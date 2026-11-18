@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+
+# Secrets (CRITICAL!)
+.env
+*.pem
+*.key
+
+# LaTeX build files
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz
+
+# OS / IDE
+.DS_Store
+.vscode/
+.idea/

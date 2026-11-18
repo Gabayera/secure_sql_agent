@@ -1,0 +1,78 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: sqlagent-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: sqlagent_demo
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_root_pw
+    ports:
+      - "5433:5432"                       # host 5433 to avoid native Postgres on 5432
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./scripts/docker-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d sqlagent_demo"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: sqlagent-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list > /dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  ollama-pull:
+    image: ollama/ollama:latest
+    container_name: sqlagent-ollama-pull
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["sh", "-c", "ollama pull qwen2.5-coder:7b"]
+    restart: "no"
+
+  agent:
+    build: .
+    container_name: sqlagent-app
+    profiles: ["agent"]                  # only started via `docker compose run`, not `up`
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama-pull:
+        condition: service_completed_successfully   # model is guaranteed pulled
+    environment:
+      LLM_PROVIDER: ollama
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: qwen2.5-coder:7b
+      DATABASE_DIALECT: postgres
+      READONLY_DATABASE_URL: postgresql+psycopg://sql_agent_readonly:readonly_pass_123@postgres:5432/sqlagent_demo
+      WRITER_DATABASE_URL:   postgresql+psycopg://sql_agent_writer:writer_pass_456@postgres:5432/sqlagent_demo
+      ALLOWED_SCHEMAS: public
+      DEFAULT_SCHEMA: public
+      ENABLE_DDL: "false"
+      MAX_WRITE_ROWS: "100"
+      MAX_RESULT_ROWS: "1000"
+      STATEMENT_TIMEOUT_MS: "5000"
+      LOCK_TIMEOUT_MS: "2000"
+      MAX_SQL_REPAIR_ATTEMPTS: "2"
+      AUDIT_LOG_PATH: /app/logs/audit.log
+    volumes:
+      - ./logs:/app/logs
+    stdin_open: true
+    tty: true
+
+volumes:
+  pg_data:
+  ollama_models:
