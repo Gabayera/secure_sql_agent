@@ -1,0 +1,1644 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{booktabs}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{titlesec}
+
+\definecolor{codebg}{RGB}{246,246,248}
+\definecolor{codekw}{RGB}{0,90,180}
+\definecolor{codestr}{RGB}{160,50,50}
+\definecolor{codegreen}{RGB}{30,120,60}
+
+\lstdefinestyle{code}{
+  basicstyle=\ttfamily\footnotesize,
+  backgroundcolor=\color{codebg},
+  keywordstyle=\color{codekw}\bfseries,
+  stringstyle=\color{codestr},
+  commentstyle=\color{codegreen}\itshape,
+  frame=single,cd ~/Projects/secure_sql_agent/presentation
+cat > setup.tex <<'TEXEOF'
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{booktabs}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{titlesec}
+
+\definecolor{codebg}{RGB}{246,246,248}
+\definecolor{codekw}{RGB}{0,90,180}
+\definecolor{codestr}{RGB}{160,50,50}
+\definecolor{codegreen}{RGB}{30,120,60}
+
+\lstdefinestyle{code}{
+  basicstyle=\ttfamily\footnotesize,
+  backgroundcolor=\color{codebg},
+  keywordstyle=\color{codekw}\bfseries,
+  stringstyle=\color{codestr},
+  commentstyle=\color{codegreen}\itshape,
+  frame=single,
+  rulecolor=\color{gray!50},
+  breaklines=true,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  extendedchars=false,
+  upquote=true,
+  language=bash,
+}
+\lstset{style=code}
+
+\titleformat{\section}{\Large\bfseries\color{codekw}}{}{0pt}{}
+\titleformat{\subsection}{\large\bfseries}{}{0pt}{}
+
+\title{\textbf{Secure SQL AI Agent --- Installation and Run Guide}}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section*{Overview}
+
+This document walks you from a fresh Ubuntu system to a running agent, in
+two possible ways:
+
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Native install} --- Python, PostgreSQL, and Ollama on the host
+  \item \textbf{Docker} --- all services in containers with one command
+\end{itemize}
+
+Pick \textbf{one}. Do not mix them.
+
+---
+
+\section{Prerequisites (both paths)}
+
+\subsection{Hardware}
+
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{RAM} & \textbf{Model to use} & \textbf{Approx download} \\
+\midrule
+4 GB   & qwen2.5-coder:1.5b & 1 GB \\
+8 GB   & qwen2.5-coder:3b   & 2 GB \\
+16 GB  & qwen2.5-coder:7b   & 5 GB (recommended) \\
+32 GB  & qwen2.5-coder:14b  & 9 GB \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Verify basics}
+
+\begin{lstlisting}
+free -h | head -2
+df -h ~ | tail -1
+curl -s -o /dev/null -w "%{http_code}\n" https://ollama.com
+\end{lstlisting}
+
+The \texttt{curl} must return \texttt{200}.
+
+---
+
+\section{Path A --- Native install (Ubuntu)}
+
+\subsection{System packages}
+
+\begin{lstlisting}
+sudo apt update
+sudo apt install -y python3-venv postgresql jq
+sudo systemctl status postgresql --no-pager | head -3
+\end{lstlisting}
+
+Expected: \texttt{Active: active (exited)}.
+
+\subsection{Ollama}
+
+\begin{lstlisting}
+curl -fsSL https://ollama.com/install.sh | sh
+sudo systemctl status ollama --no-pager | head -3
+curl -s http://localhost:11434/api/version
+\end{lstlisting}
+
+Expected: \texttt{Active: active (running)} and a JSON version response.
+
+\subsection{Pull the model}
+
+Use the size that matches your RAM:
+
+\begin{lstlisting}
+ollama pull qwen2.5-coder:7b
+\end{lstlisting}
+
+Test it:
+
+\begin{lstlisting}
+ollama run qwen2.5-coder:7b \
+  "Write a PostgreSQL SELECT that returns all rows from orders."
+\end{lstlisting}
+
+Type \texttt{/bye} to exit the model prompt.
+
+\subsection{Python project}
+
+\begin{lstlisting}
+git clone <your-repo-url> ~/Projects/secure_sql_agent
+cd ~/Projects/secure_sql_agent
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+pytest
+\end{lstlisting}
+
+Expected: \texttt{41 passed in \textless{}1s}.
+
+\subsection{Database}
+
+\begin{lstlisting}
+sudo -u postgres createdb sqlagent_demo
+sudo -u postgres psql -d sqlagent_demo \
+  -v dbname=sqlagent_demo \
+  -f scripts/bootstrap_postgres_roles.sql
+sudo -u postgres psql -d sqlagent_demo -f scripts/demo_ecommerce.sql
+sudo -u postgres psql -d sqlagent_demo -c \
+  "ALTER ROLE sql_agent_readonly WITH PASSWORD 'readonly_pass_123';"
+sudo -u postgres psql -d sqlagent_demo -c \
+  "ALTER ROLE sql_agent_writer   WITH PASSWORD 'writer_pass_456';"
+\end{lstlisting}
+
+Re-grant SELECT after the schema reload:
+
+\begin{lstlisting}
+sudo -u postgres psql -d sqlagent_demo -c \
+  "GRANT SELECT ON ALL TABLES IN SCHEMA public TO sql_agent_readonly;"
+\end{lstlisting}
+
+\subsection{Configuration}
+
+\begin{lstlisting}
+cp .env.example .env
+\end{lstlisting}
+
+Edit \texttt{.env}. Required keys:
+
+\begin{lstlisting}
+LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=qwen2.5-coder:7b
+
+READONLY_DATABASE_URL=postgresql+psycopg://sql_agent_readonly:readonly_pass_123@localhost:5432/sqlagent_demo
+WRITER_DATABASE_URL=postgresql+psycopg://sql_agent_writer:writer_pass_456@localhost:5432/sqlagent_demo
+
+ALLOWED_SCHEMAS=public
+DEFAULT_SCHEMA=public
+ENABLE_DDL=false
+MAX_WRITE_ROWS=100
+MAX_RESULT_ROWS=1000
+STATEMENT_TIMEOUT_MS=5000
+LOCK_TIMEOUT_MS=2000
+MAX_SQL_REPAIR_ATTEMPTS=2
+AUDIT_LOG_PATH=logs/audit.log
+\end{lstlisting}
+
+The read-only and writer URLs must differ. The application refuses to start
+if the two roles are the same.
+
+\subsection{Run}
+
+\begin{lstlisting}
+source .venv/bin/activate
+python -m app.main
+\end{lstlisting}
+
+Expected banner:
+
+\begin{lstlisting}
+==========================================
+          SECURE SQL AI AGENT
+==========================================
+Database: postgres
+Status:   Connected
+Schema:   public
+LLM:      ollama
+==========================================
+\end{lstlisting}
+
+---
+
+\section{Path B --- Docker}
+
+\subsection{Bring up the stack}
+
+\begin{lstlisting}
+cd ~/Projects/secure_sql_agent
+docker compose up -d --build
+\end{lstlisting}
+
+First run takes about 10 minutes: it downloads the model (\textasciitilde 5 GB).
+
+\subsection{Watch the model download}
+
+\begin{lstlisting}
+docker compose logs -f ollama-pull
+\end{lstlisting}
+
+Wait for a line containing \texttt{success}, then \texttt{Ctrl+C}.
+
+\subsection{Confirm container status}
+
+\begin{lstlisting}
+docker compose ps
+\end{lstlisting}
+
+Expected:
+
+\begin{lstlisting}
+sqlagent-postgres      Up (healthy)
+sqlagent-ollama        Up (healthy)
+sqlagent-ollama-pull   Exited (0)
+\end{lstlisting}
+
+The agent container is intentionally absent --- it starts only when you call it.
+
+\subsection{Run the interactive agent}
+
+\begin{lstlisting}
+docker compose run --rm agent
+\end{lstlisting}
+
+This gives you the same banner as native mode, with \texttt{Status: Connected}.
+
+\subsection{Stop}
+
+\begin{lstlisting}
+docker compose down         # keep data and model
+docker compose down -v      # wipe everything (model re-downloaded next run)
+\end{lstlisting}
+
+---
+
+\section{Verification checklist}
+
+Before any demo, run these three commands:
+
+\begin{lstlisting}
+# 1. Ollama reachable
+curl -s http://localhost:11434/api/version
+
+# 2. Model present
+curl -s http://localhost:11434/api/tags | jq -r '.models[].name'
+
+# 3. Read-only role can SELECT (native path uses port 5432;
+#    Docker uses port 5433)
+PGPASSWORD=readonly_pass_123 psql -h localhost -p 5432 \
+  -U sql_agent_readonly -d sqlagent_demo \
+  -c "SELECT count(*) FROM orders;"
+\end{lstlisting}
+
+All three must succeed. If they do, the CLI will start connected.
+
+\subsection{Confirm the security layers work}
+
+\begin{lstlisting}
+# Read-only role cannot write (must fail)
+PGPASSWORD=readonly_pass_123 psql -h localhost -p 5432 \
+  -U sql_agent_readonly -d sqlagent_demo \
+  -c "INSERT INTO products (name, price) VALUES ('x', 1);"
+\end{lstlisting}
+
+Expected output: \texttt{ERROR: permission denied for table products}.
+
+\begin{lstlisting}
+# Writer role can write (must succeed)
+PGPASSWORD=writer_pass_456 psql -h localhost -p 5432 \
+  -U sql_agent_writer -d sqlagent_demo \
+  -c "INSERT INTO products (name, price) VALUES ('tmp', 1) RETURNING id;"
+PGPASSWORD=writer_pass_456 psql -h localhost -p 5432 \
+  -U sql_agent_writer -d sqlagent_demo \
+  -c "DELETE FROM products WHERE name = 'tmp';"
+\end{lstlisting}
+
+Both must succeed. This proves the two-role separation is in effect.
+
+---
+
+\section{Troubleshooting}
+
+\begin{center}
+\begin{tabular}{@{}p{5.8cm}p{8.5cm}@{}}
+\toprule
+\textbf{Symptom} & \textbf{Fix} \\
+\midrule
+\texttt{ModuleNotFoundError: No module named 'pydantic'} &
+Venv is not active. \texttt{source .venv/bin/activate}. \\
+\texttt{Unit ollama.service not found} &
+Ollama not installed. Run \texttt{curl -fsSL https://ollama.com/install.sh | sh}. \\
+\texttt{connection refused} on port 5432 &
+Native Postgres is not running. \texttt{sudo systemctl start postgresql}. \\
+Docker: port 5432 already in use &
+Change host port in compose to 5433 (already default in this project). \\
+\texttt{model 'qwen2.5-coder:7b' not found} &
+Run \texttt{ollama pull qwen2.5-coder:7b} or fix \texttt{OLLAMA\_MODEL} in \texttt{.env}. \\
+Banner shows \texttt{LLM: mock} &
+A shell-level \texttt{LLM\_PROVIDER} env var overrides \texttt{.env}. Run \texttt{unset LLM\_PROVIDER}. \\
+\texttt{error parsing value for field "allowed\_schemas"} &
+Older \texttt{pydantic-settings} without \texttt{NoDecode}. Upgrade with \texttt{pip install --upgrade pydantic-settings}. \\
+\texttt{qualify() got an unexpected keyword argument 'infer\_schema'} &
+SQLGlot version drift. Run \texttt{pip install sqlglot==25.24.0}. \\
+\texttt{Extra data: line 2 ... json.tool} &
+Audit log is JSONL. Use \texttt{tail -n 1 logs/audit.log | jq .}. \\
+\texttt{permission denied for table ...} &
+Read-only role hitting a table without \texttt{SELECT}. Re-grant after schema reload. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+---
+
+\section{Optional helper script}
+
+Save the following as \texttt{scripts/setup.sh} and \texttt{chmod +x} it.
+It performs the native install end-to-end.
+
+\begin{lstlisting}[language=bash]
+#!/usr/bin/env bash
+set -euo pipefail
+
+MODEL="${MODEL:-qwen2.5-coder:7b}"
+DBNAME="${DBNAME:-sqlagent_demo}"
+
+echo "==> Installing system packages"
+sudo apt update
+sudo apt install -y python3-venv postgresql jq curl
+
+echo "==> Installing Ollama"
+if ! command -v ollama >/dev/null; then
+  curl -fsSL https://ollama.com/install.sh | sh
+fi
+
+echo "==> Pulling model ${MODEL}"
+ollama pull "${MODEL}"
+
+echo "==> Creating database ${DBNAME}"
+sudo -u postgres createdb "${DBNAME}" 2>/dev/null || true
+
+echo "==> Creating roles and loading schema"
+sudo -u postgres psql -d "${DBNAME}" -v dbname="${DBNAME}" \
+  -f scripts/bootstrap_postgres_roles.sql
+sudo -u postgres psql -d "${DBNAME}" -f scripts/demo_ecommerce.sql
+sudo -u postgres psql -d "${DBNAME}" \
+  -c "ALTER ROLE sql_agent_readonly WITH PASSWORD 'readonly_pass_123';"
+sudo -u postgres psql -d "${DBNAME}" \
+  -c "ALTER ROLE sql_agent_writer WITH PASSWORD 'writer_pass_456';"
+sudo -u postgres psql -d "${DBNAME}" \
+  -c "GRANT SELECT ON ALL TABLES IN SCHEMA public TO sql_agent_readonly;"
+
+echo "==> Setting up Python environment"
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --quiet --upgrade pip
+pip install --quiet -r requirements.txt
+
+echo "==> Running tests"
+pytest
+
+echo "==> Preparing .env"
+[ -f .env ] || cp .env.example .env
+python - <<'PY'
+from pathlib import Path
+p = Path(".env")
+t = p.read_text()
+t = t.replace("LLM_PROVIDER=mock", "LLM_PROVIDER=ollama")
+p.write_text(t)
+PY
+
+echo
+echo "Setup complete. Run:"
+echo "  source .venv/bin/activate"
+echo "  python -m app.main"
+\end{lstlisting}
+
+\end{document}
+TEXEOF
+
+echo "setup.tex written: $(wc -l < setup.tex) lines"cd ~/Projects/secure_sql_agent/presentation
+cat > setup.tex <<'TEXEOF'
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{booktabs}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{titlesec}
+
+\definecolor{codebg}{RGB}{246,246,248}
+\definecolor{codekw}{RGB}{0,90,180}
+\definecolor{codestr}{RGB}{160,50,50}
+\definecolor{codegreen}{RGB}{30,120,60}
+
+\lstdefinestyle{code}{
+  basicstyle=\ttfamily\footnotesize,
+  backgroundcolor=\color{codebg},
+  keywordstyle=\color{codekw}\bfseries,
+  stringstyle=\color{codestr},
+  commentstyle=\color{codegreen}\itshape,
+  frame=single,
+  rulecolor=\color{gray!50},
+  breaklines=true,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  extendedchars=false,
+  upquote=true,
+  language=bash,
+}
+\lstset{style=code}
+
+\titleformat{\section}{\Large\bfseries\color{codekw}}{}{0pt}{}
+\titleformat{\subsection}{\large\bfseries}{}{0pt}{}
+
+\title{\textbf{Secure SQL AI Agent --- Installation and Run Guide}}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section*{Overview}
+
+This document walks you from a fresh Ubuntu system to a running agent, in
+two possible ways:
+
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Native install} --- Python, PostgreSQL, and Ollama on the host
+  \item \textbf{Docker} --- all services in containers with one command
+\end{itemize}
+
+Pick \textbf{one}. Do not mix them.
+
+---
+
+\section{Prerequisites (both paths)}
+
+\subsection{Hardware}
+
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{RAM} & \textbf{Model to use} & \textbf{Approx download} \\
+\midrule
+4 GB   & qwen2.5-coder:1.5b & 1 GB \\
+8 GB   & qwen2.5-coder:3b   & 2 GB \\
+16 GB  & qwen2.5-coder:7b   & 5 GB (recommended) \\
+32 GB  & qwen2.5-coder:14b  & 9 GB \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Verify basics}
+
+\begin{lstlisting}
+free -h | head -2
+df -h ~ | tail -1
+curl -s -o /dev/null -w "%{http_code}\n" https://ollama.com
+\end{lstlisting}
+
+The \texttt{curl} must return \texttt{200}.
+
+---
+
+\section{Path A --- Native install (Ubuntu)}
+
+\subsection{System packages}
+
+\begin{lstlisting}
+sudo apt update
+sudo apt install -y python3-venv postgresql jq
+sudo systemctl status postgresql --no-pager | head -3
+\end{lstlisting}
+
+Expected: \texttt{Active: active (exited)}.
+
+\subsection{Ollama}
+
+\begin{lstlisting}
+curl -fsSL https://ollama.com/install.sh | sh
+sudo systemctl status ollama --no-pager | head -3
+curl -s http://localhost:11434/api/version
+\end{lstlisting}
+
+Expected: \texttt{Active: active (running)} and a JSON version response.
+
+\subsection{Pull the model}
+
+Use the size that matches your RAM:
+
+\begin{lstlisting}
+ollama pull qwen2.5-coder:7b
+\end{lstlisting}
+
+Test it:
+
+\begin{lstlisting}
+ollama run qwen2.5-coder:7b \
+  "Write a PostgreSQL SELECT that returns all rows from orders."
+\end{lstlisting}
+
+Type \texttt{/bye} to exit the model prompt.
+
+\subsection{Python project}
+
+\begin{lstlisting}
+git clone <your-repo-url> ~/Projects/secure_sql_agent
+cd ~/Projects/secure_sql_agent
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+pytest
+\end{lstlisting}
+
+Expected: \texttt{41 passed in \textless{}1s}.
+
+\subsection{Database}
+
+\begin{lstlisting}
+sudo -u postgres createdb sqlagent_demo
+sudo -u postgres psql -d sqlagent_demo \
+  -v dbname=sqlagent_demo \
+  -f scripts/bootstrap_postgres_roles.sql
+sudo -u postgres psql -d sqlagent_demo -f scripts/demo_ecommerce.sql
+sudo -u postgres psql -d sqlagent_demo -c \
+  "ALTER ROLE sql_agent_readonly WITH PASSWORD 'readonly_pass_123';"
+sudo -u postgres psql -d sqlagent_demo -c \
+  "ALTER ROLE sql_agent_writer   WITH PASSWORD 'writer_pass_456';"
+\end{lstlisting}
+
+Re-grant SELECT after the schema reload:
+
+\begin{lstlisting}
+sudo -u postgres psql -d sqlagent_demo -c \
+  "GRANT SELECT ON ALL TABLES IN SCHEMA public TO sql_agent_readonly;"
+\end{lstlisting}
+
+\subsection{Configuration}
+
+\begin{lstlisting}
+cp .env.example .env
+\end{lstlisting}
+
+Edit \texttt{.env}. Required keys:
+
+\begin{lstlisting}
+LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=qwen2.5-coder:7b
+
+READONLY_DATABASE_URL=postgresql+psycopg://sql_agent_readonly:readonly_pass_123@localhost:5432/sqlagent_demo
+WRITER_DATABASE_URL=postgresql+psycopg://sql_agent_writer:writer_pass_456@localhost:5432/sqlagent_demo
+
+ALLOWED_SCHEMAS=public
+DEFAULT_SCHEMA=public
+ENABLE_DDL=false
+MAX_WRITE_ROWS=100
+MAX_RESULT_ROWS=1000
+STATEMENT_TIMEOUT_MS=5000
+LOCK_TIMEOUT_MS=2000
+MAX_SQL_REPAIR_ATTEMPTS=2
+AUDIT_LOG_PATH=logs/audit.log
+\end{lstlisting}
+
+The read-only and writer URLs must differ. The application refuses to start
+if the two roles are the same.
+
+\subsection{Run}
+
+\begin{lstlisting}
+source .venv/bin/activate
+python -m app.main
+\end{lstlisting}
+
+Expected banner:
+
+\begin{lstlisting}
+==========================================
+          SECURE SQL AI AGENT
+==========================================
+Database: postgres
+Status:   Connected
+Schema:   public
+LLM:      ollama
+==========================================
+\end{lstlisting}
+
+---
+
+\section{Path B --- Docker}
+
+\subsection{Bring up the stack}
+
+\begin{lstlisting}
+cd ~/Projects/secure_sql_agent
+docker compose up -d --build
+\end{lstlisting}
+
+First run takes about 10 minutes: it downloads the model (\textasciitilde 5 GB).
+
+\subsection{Watch the model download}
+
+\begin{lstlisting}
+docker compose logs -f ollama-pull
+\end{lstlisting}
+
+Wait for a line containing \texttt{success}, then \texttt{Ctrl+C}.
+
+\subsection{Confirm container status}
+
+\begin{lstlisting}
+docker compose ps
+\end{lstlisting}
+
+Expected:
+
+\begin{lstlisting}
+sqlagent-postgres      Up (healthy)
+sqlagent-ollama        Up (healthy)
+sqlagent-ollama-pull   Exited (0)
+\end{lstlisting}
+
+The agent container is intentionally absent --- it starts only when you call it.
+
+\subsection{Run the interactive agent}
+
+\begin{lstlisting}
+docker compose run --rm agent
+\end{lstlisting}
+
+This gives you the same banner as native mode, with \texttt{Status: Connected}.
+
+\subsection{Stop}
+
+\begin{lstlisting}
+docker compose down         # keep data and model
+docker compose down -v      # wipe everything (model re-downloaded next run)
+\end{lstlisting}
+
+---
+
+\section{Verification checklist}
+
+Before any demo, run these three commands:
+
+\begin{lstlisting}
+# 1. Ollama reachable
+curl -s http://localhost:11434/api/version
+
+# 2. Model present
+curl -s http://localhost:11434/api/tags | jq -r '.models[].name'
+
+# 3. Read-only role can SELECT (native path uses port 5432;
+#    Docker uses port 5433)
+PGPASSWORD=readonly_pass_123 psql -h localhost -p 5432 \
+  -U sql_agent_readonly -d sqlagent_demo \
+  -c "SELECT count(*) FROM orders;"
+\end{lstlisting}
+
+All three must succeed. If they do, the CLI will start connected.
+
+\subsection{Confirm the security layers work}
+
+\begin{lstlisting}
+# Read-only role cannot write (must fail)
+PGPASSWORD=readonly_pass_123 psql -h localhost -p 5432 \
+  -U sql_agent_readonly -d sqlagent_demo \
+  -c "INSERT INTO products (name, price) VALUES ('x', 1);"
+\end{lstlisting}
+
+Expected output: \texttt{ERROR: permission denied for table products}.
+
+\begin{lstlisting}
+# Writer role can write (must succeed)
+PGPASSWORD=writer_pass_456 psql -h localhost -p 5432 \
+  -U sql_agent_writer -d sqlagent_demo \
+  -c "INSERT INTO products (name, price) VALUES ('tmp', 1) RETURNING id;"
+PGPASSWORD=writer_pass_456 psql -h localhost -p 5432 \
+  -U sql_agent_writer -d sqlagent_demo \
+  -c "DELETE FROM products WHERE name = 'tmp';"
+\end{lstlisting}
+
+Both must succeed. This proves the two-role separation is in effect.
+
+---
+
+\section{Troubleshooting}
+
+\begin{center}
+\begin{tabular}{@{}p{5.8cm}p{8.5cm}@{}}
+\toprule
+\textbf{Symptom} & \textbf{Fix} \\
+\midrule
+\texttt{ModuleNotFoundError: No module named 'pydantic'} &
+Venv is not active. \texttt{source .venv/bin/activate}. \\
+\texttt{Unit ollama.service not found} &
+Ollama not installed. Run \texttt{curl -fsSL https://ollama.com/install.sh | sh}. \\
+\texttt{connection refused} on port 5432 &
+Native Postgres is not running. \texttt{sudo systemctl start postgresql}. \\
+Docker: port 5432 already in use &
+Change host port in compose to 5433 (already default in this project). \\
+\texttt{model 'qwen2.5-coder:7b' not found} &
+Run \texttt{ollama pull qwen2.5-coder:7b} or fix \texttt{OLLAMA\_MODEL} in \texttt{.env}. \\
+Banner shows \texttt{LLM: mock} &
+A shell-level \texttt{LLM\_PROVIDER} env var overrides \texttt{.env}. Run \texttt{unset LLM\_PROVIDER}. \\
+\texttt{error parsing value for field "allowed\_schemas"} &
+Older \texttt{pydantic-settings} without \texttt{NoDecode}. Upgrade with \texttt{pip install --upgrade pydantic-settings}. \\
+\texttt{qualify() got an unexpected keyword argument 'infer\_schema'} &
+SQLGlot version drift. Run \texttt{pip install sqlglot==25.24.0}. \\
+\texttt{Extra data: line 2 ... json.tool} &
+Audit log is JSONL. Use \texttt{tail -n 1 logs/audit.log | jq .}. \\
+\texttt{permission denied for table ...} &
+Read-only role hitting a table without \texttt{SELECT}. Re-grant after schema reload. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+---
+
+\section{Optional helper script}
+
+Save the following as \texttt{scripts/setup.sh} and \texttt{chmod +x} it.
+It performs the native install end-to-end.
+
+\begin{lstlisting}[language=bash]
+#!/usr/bin/env bash
+set -euo pipefail
+
+MODEL="${MODEL:-qwen2.5-coder:7b}"
+DBNAME="${DBNAME:-sqlagent_demo}"
+
+echo "==> Installing system packages"
+sudo apt update
+sudo apt install -y python3-venv postgresql jq curl
+
+echo "==> Installing Ollama"
+if ! command -v ollama >/dev/null; then
+  curl -fsSL https://ollama.com/install.sh | sh
+fi
+
+echo "==> Pulling model ${MODEL}"
+ollama pull "${MODEL}"
+
+echo "==> Creating database ${DBNAME}"
+sudo -u postgres createdb "${DBNAME}" 2>/dev/null || true
+
+echo "==> Creating roles and loading schema"
+sudo -u postgres psql -d "${DBNAME}" -v dbname="${DBNAME}" \
+  -f scripts/bootstrap_postgres_roles.sql
+sudo -u postgres psql -d "${DBNAME}" -f scripts/demo_ecommerce.sql
+sudo -u postgres psql -d "${DBNAME}" \
+  -c "ALTER ROLE sql_agent_readonly WITH PASSWORD 'readonly_pass_123';"
+sudo -u postgres psql -d "${DBNAME}" \
+  -c "ALTER ROLE sql_agent_writer WITH PASSWORD 'writer_pass_456';"
+sudo -u postgres psql -d "${DBNAME}" \
+  -c "GRANT SELECT ON ALL TABLES IN SCHEMA public TO sql_agent_readonly;"
+
+echo "==> Setting up Python environment"
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --quiet --upgrade pip
+pip install --quiet -r requirements.txt
+
+echo "==> Running tests"
+pytest
+
+echo "==> Preparing .env"
+[ -f .env ] || cp .env.example .env
+python - <<'PY'
+from pathlib import Path
+p = Path(".env")
+t = p.read_text()
+t = t.replace("LLM_PROVIDER=mock", "LLM_PROVIDER=ollama")
+p.write_text(t)
+PY
+
+echo
+echo "Setup complete. Run:"
+echo "  source .venv/bin/activate"
+echo "  python -m app.main"
+\end{lstlisting}
+
+\end{document}
+TEXEOF
+
+echo "setup.tex written: $(wc -l < setup.tex) lines"cd ~/Projects/secure_sql_agent/presentation
+cat > setup.tex <<'TEXEOF'
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{booktabs}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{titlesec}
+
+\definecolor{codebg}{RGB}{246,246,248}
+\definecolor{codekw}{RGB}{0,90,180}
+\definecolor{codestr}{RGB}{160,50,50}
+\definecolor{codegreen}{RGB}{30,120,60}
+
+\lstdefinestyle{code}{
+  basicstyle=\ttfamily\footnotesize,
+  backgroundcolor=\color{codebg},
+  keywordstyle=\color{codekw}\bfseries,
+  stringstyle=\color{codestr},
+  commentstyle=\color{codegreen}\itshape,
+  frame=single,
+  rulecolor=\color{gray!50},
+  breaklines=true,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  extendedchars=false,
+  upquote=true,
+  language=bash,
+}
+\lstset{style=code}
+
+\titleformat{\section}{\Large\bfseries\color{codekw}}{}{0pt}{}
+\titleformat{\subsection}{\large\bfseries}{}{0pt}{}
+
+\title{\textbf{Secure SQL AI Agent --- Installation and Run Guide}}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section*{Overview}
+
+This document walks you from a fresh Ubuntu system to a running agent, in
+two possible ways:
+
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Native install} --- Python, PostgreSQL, and Ollama on the host
+  \item \textbf{Docker} --- all services in containers with one command
+\end{itemize}
+
+Pick \textbf{one}. Do not mix them.
+
+---
+
+\section{Prerequisites (both paths)}
+
+\subsection{Hardware}
+
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{RAM} & \textbf{Model to use} & \textbf{Approx download} \\
+\midrule
+4 GB   & qwen2.5-coder:1.5b & 1 GB \\
+8 GB   & qwen2.5-coder:3b   & 2 GB \\
+16 GB  & qwen2.5-coder:7b   & 5 GB (recommended) \\
+32 GB  & qwen2.5-coder:14b  & 9 GB \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Verify basics}
+
+\begin{lstlisting}
+free -h | head -2
+df -h ~ | tail -1
+curl -s -o /dev/null -w "%{http_code}\n" https://ollama.com
+\end{lstlisting}
+
+The \texttt{curl} must return \texttt{200}.
+
+---
+
+\section{Path A --- Native install (Ubuntu)}
+
+\subsection{System packages}
+
+\begin{lstlisting}
+sudo apt update
+sudo apt install -y python3-venv postgresql jq
+sudo systemctl status postgresql --no-pager | head -3
+\end{lstlisting}
+
+Expected: \texttt{Active: active (exited)}.
+
+\subsection{Ollama}
+
+\begin{lstlisting}
+curl -fsSL https://ollama.com/install.sh | sh
+sudo systemctl status ollama --no-pager | head -3
+curl -s http://localhost:11434/api/version
+\end{lstlisting}
+
+Expected: \texttt{Active: active (running)} and a JSON version response.
+
+\subsection{Pull the model}
+
+Use the size that matches your RAM:
+
+\begin{lstlisting}
+ollama pull qwen2.5-coder:7b
+\end{lstlisting}
+
+Test it:
+
+\begin{lstlisting}
+ollama run qwen2.5-coder:7b \
+  "Write a PostgreSQL SELECT that returns all rows from orders."
+\end{lstlisting}
+
+Type \texttt{/bye} to exit the model prompt.
+
+\subsection{Python project}
+
+\begin{lstlisting}
+git clone <your-repo-url> ~/Projects/secure_sql_agent
+cd ~/Projects/secure_sql_agent
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+pytest
+\end{lstlisting}
+
+Expected: \texttt{41 passed in \textless{}1s}.
+
+\subsection{Database}
+
+\begin{lstlisting}
+sudo -u postgres createdb sqlagent_demo
+sudo -u postgres psql -d sqlagent_demo \
+  -v dbname=sqlagent_demo \
+  -f scripts/bootstrap_postgres_roles.sql
+sudo -u postgres psql -d sqlagent_demo -f scripts/demo_ecommerce.sql
+sudo -u postgres psql -d sqlagent_demo -c \
+  "ALTER ROLE sql_agent_readonly WITH PASSWORD 'readonly_pass_123';"
+sudo -u postgres psql -d sqlagent_demo -c \
+  "ALTER ROLE sql_agent_writer   WITH PASSWORD 'writer_pass_456';"
+\end{lstlisting}
+
+Re-grant SELECT after the schema reload:
+
+\begin{lstlisting}
+sudo -u postgres psql -d sqlagent_demo -c \
+  "GRANT SELECT ON ALL TABLES IN SCHEMA public TO sql_agent_readonly;"
+\end{lstlisting}
+
+\subsection{Configuration}
+
+\begin{lstlisting}
+cp .env.example .env
+\end{lstlisting}
+
+Edit \texttt{.env}. Required keys:
+
+\begin{lstlisting}
+LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=qwen2.5-coder:7b
+
+READONLY_DATABASE_URL=postgresql+psycopg://sql_agent_readonly:readonly_pass_123@localhost:5432/sqlagent_demo
+WRITER_DATABASE_URL=postgresql+psycopg://sql_agent_writer:writer_pass_456@localhost:5432/sqlagent_demo
+
+ALLOWED_SCHEMAS=public
+DEFAULT_SCHEMA=public
+ENABLE_DDL=false
+MAX_WRITE_ROWS=100
+MAX_RESULT_ROWS=1000
+STATEMENT_TIMEOUT_MS=5000
+LOCK_TIMEOUT_MS=2000
+MAX_SQL_REPAIR_ATTEMPTS=2
+AUDIT_LOG_PATH=logs/audit.log
+\end{lstlisting}
+
+The read-only and writer URLs must differ. The application refuses to start
+if the two roles are the same.
+
+\subsection{Run}
+
+\begin{lstlisting}
+source .venv/bin/activate
+python -m app.main
+\end{lstlisting}
+
+Expected banner:
+
+\begin{lstlisting}
+==========================================
+          SECURE SQL AI AGENT
+==========================================
+Database: postgres
+Status:   Connected
+Schema:   public
+LLM:      ollama
+==========================================
+\end{lstlisting}
+
+---
+
+\section{Path B --- Docker}
+
+\subsection{Bring up the stack}
+
+\begin{lstlisting}
+cd ~/Projects/secure_sql_agent
+docker compose up -d --build
+\end{lstlisting}
+
+First run takes about 10 minutes: it downloads the model (\textasciitilde 5 GB).
+
+\subsection{Watch the model download}
+
+\begin{lstlisting}
+docker compose logs -f ollama-pull
+\end{lstlisting}
+
+Wait for a line containing \texttt{success}, then \texttt{Ctrl+C}.
+
+\subsection{Confirm container status}
+
+\begin{lstlisting}
+docker compose ps
+\end{lstlisting}
+
+Expected:
+
+\begin{lstlisting}
+sqlagent-postgres      Up (healthy)
+sqlagent-ollama        Up (healthy)
+sqlagent-ollama-pull   Exited (0)
+\end{lstlisting}
+
+The agent container is intentionally absent --- it starts only when you call it.
+
+\subsection{Run the interactive agent}
+
+\begin{lstlisting}
+docker compose run --rm agent
+\end{lstlisting}
+
+This gives you the same banner as native mode, with \texttt{Status: Connected}.
+
+\subsection{Stop}
+
+\begin{lstlisting}
+docker compose down         # keep data and model
+docker compose down -v      # wipe everything (model re-downloaded next run)
+\end{lstlisting}
+
+---
+
+\section{Verification checklist}
+
+Before any demo, run these three commands:
+
+\begin{lstlisting}
+# 1. Ollama reachable
+curl -s http://localhost:11434/api/version
+
+# 2. Model present
+curl -s http://localhost:11434/api/tags | jq -r '.models[].name'
+
+# 3. Read-only role can SELECT (native path uses port 5432;
+#    Docker uses port 5433)
+PGPASSWORD=readonly_pass_123 psql -h localhost -p 5432 \
+  -U sql_agent_readonly -d sqlagent_demo \
+  -c "SELECT count(*) FROM orders;"
+\end{lstlisting}
+
+All three must succeed. If they do, the CLI will start connected.
+
+\subsection{Confirm the security layers work}
+
+\begin{lstlisting}
+# Read-only role cannot write (must fail)
+PGPASSWORD=readonly_pass_123 psql -h localhost -p 5432 \
+  -U sql_agent_readonly -d sqlagent_demo \
+  -c "INSERT INTO products (name, price) VALUES ('x', 1);"
+\end{lstlisting}
+
+Expected output: \texttt{ERROR: permission denied for table products}.
+
+\begin{lstlisting}
+# Writer role can write (must succeed)
+PGPASSWORD=writer_pass_456 psql -h localhost -p 5432 \
+  -U sql_agent_writer -d sqlagent_demo \
+  -c "INSERT INTO products (name, price) VALUES ('tmp', 1) RETURNING id;"
+PGPASSWORD=writer_pass_456 psql -h localhost -p 5432 \
+  -U sql_agent_writer -d sqlagent_demo \
+  -c "DELETE FROM products WHERE name = 'tmp';"
+\end{lstlisting}
+
+Both must succeed. This proves the two-role separation is in effect.
+
+---
+
+\section{Troubleshooting}
+
+\begin{center}
+\begin{tabular}{@{}p{5.8cm}p{8.5cm}@{}}
+\toprule
+\textbf{Symptom} & \textbf{Fix} \\
+\midrule
+\texttt{ModuleNotFoundError: No module named 'pydantic'} &
+Venv is not active. \texttt{source .venv/bin/activate}. \\
+\texttt{Unit ollama.service not found} &
+Ollama not installed. Run \texttt{curl -fsSL https://ollama.com/install.sh | sh}. \\
+\texttt{connection refused} on port 5432 &
+Native Postgres is not running. \texttt{sudo systemctl start postgresql}. \\
+Docker: port 5432 already in use &
+Change host port in compose to 5433 (already default in this project). \\
+\texttt{model 'qwen2.5-coder:7b' not found} &
+Run \texttt{ollama pull qwen2.5-coder:7b} or fix \texttt{OLLAMA\_MODEL} in \texttt{.env}. \\
+Banner shows \texttt{LLM: mock} &
+A shell-level \texttt{LLM\_PROVIDER} env var overrides \texttt{.env}. Run \texttt{unset LLM\_PROVIDER}. \\
+\texttt{error parsing value for field "allowed\_schemas"} &
+Older \texttt{pydantic-settings} without \texttt{NoDecode}. Upgrade with \texttt{pip install --upgrade pydantic-settings}. \\
+\texttt{qualify() got an unexpected keyword argument 'infer\_schema'} &
+SQLGlot version drift. Run \texttt{pip install sqlglot==25.24.0}. \\
+\texttt{Extra data: line 2 ... json.tool} &
+Audit log is JSONL. Use \texttt{tail -n 1 logs/audit.log | jq .}. \\
+\texttt{permission denied for table ...} &
+Read-only role hitting a table without \texttt{SELECT}. Re-grant after schema reload. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+---
+
+\section{Optional helper script}
+
+Save the following as \texttt{scripts/setup.sh} and \texttt{chmod +x} it.
+It performs the native install end-to-end.
+
+\begin{lstlisting}[language=bash]
+#!/usr/bin/env bash
+set -euo pipefail
+
+MODEL="${MODEL:-qwen2.5-coder:7b}"
+DBNAME="${DBNAME:-sqlagent_demo}"
+
+echo "==> Installing system packages"
+sudo apt update
+sudo apt install -y python3-venv postgresql jq curl
+
+echo "==> Installing Ollama"
+if ! command -v ollama >/dev/null; then
+  curl -fsSL https://ollama.com/install.sh | sh
+fi
+
+echo "==> Pulling model ${MODEL}"
+ollama pull "${MODEL}"
+
+echo "==> Creating database ${DBNAME}"
+sudo -u postgres createdb "${DBNAME}" 2>/dev/null || true
+
+echo "==> Creating roles and loading schema"
+sudo -u postgres psql -d "${DBNAME}" -v dbname="${DBNAME}" \
+  -f scripts/bootstrap_postgres_roles.sql
+sudo -u postgres psql -d "${DBNAME}" -f scripts/demo_ecommerce.sql
+sudo -u postgres psql -d "${DBNAME}" \
+  -c "ALTER ROLE sql_agent_readonly WITH PASSWORD 'readonly_pass_123';"
+sudo -u postgres psql -d "${DBNAME}" \
+  -c "ALTER ROLE sql_agent_writer WITH PASSWORD 'writer_pass_456';"
+sudo -u postgres psql -d "${DBNAME}" \
+  -c "GRANT SELECT ON ALL TABLES IN SCHEMA public TO sql_agent_readonly;"
+
+echo "==> Setting up Python environment"
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --quiet --upgrade pip
+pip install --quiet -r requirements.txt
+
+echo "==> Running tests"
+pytest
+
+echo "==> Preparing .env"
+[ -f .env ] || cp .env.example .env
+python - <<'PY'
+from pathlib import Path
+p = Path(".env")
+t = p.read_text()
+t = t.replace("LLM_PROVIDER=mock", "LLM_PROVIDER=ollama")
+p.write_text(t)
+PY
+
+echo
+echo "Setup complete. Run:"
+echo "  source .venv/bin/activate"
+echo "  python -m app.main"
+\end{lstlisting}
+
+\end{document}
+TEXEOF
+
+echo "setup.tex written: $(wc -l < setup.tex) lines"
+  rulecolor=\color{gray!50},
+  breaklines=true,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  extendedchars=false,
+  upquote=true,
+  language=bash,
+}
+\lstset{style=code}
+
+\titleformat{\section}{\Large\bfseries\color{codekw}}{}{0pt}{}
+\titleformat{\subsection}{\large\bfseries}{}{0pt}{}
+
+\title{\textbf{Secure SQL AI Agent --- Installation and Run Guide}}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section*{Overview}
+
+This document walks you from a fresh Ubuntu system to a running agent, in
+two possible ways:
+
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Native install} --- Python, PostgreSQL, and Ollama on the host
+  \item \textbf{Docker} --- all services in containers with one command
+\end{itemize}
+
+Pick \textbf{one}. Do not mix them.
+
+---
+
+\section{Prerequisites (both paths)}
+
+\subsection{Hardware}
+
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{RAM} & \textbf{Model to use} & \textbf{Approx download} \\
+\midrule
+4 GB   & qwen2.5-coder:1.5b & 1 GB \\
+8 GB   & qwen2.5-coder:3b   & 2 GB \\
+16 GB  & qwen2.5-coder:7b   & 5 GB (recommended) \\
+32 GB  & qwen2.5-coder:14b  & 9 GB \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Verify basics}
+
+\begin{lstlisting}
+free -h | head -2
+df -h ~ | tail -1
+curl -s -o /dev/null -w "%{http_code}\n" https://ollama.com
+\end{lstlisting}
+
+The \texttt{curl} must return \texttt{200}.
+
+---
+
+\section{Path A --- Native install (Ubuntu)}
+
+\subsection{System packages}
+
+\begin{lstlisting}
+sudo apt update
+sudo apt install -y python3-venv postgresql jq
+sudo systemctl status postgresql --no-pager | head -3
+\end{lstlisting}
+
+Expected: \texttt{Active: active (exited)}.
+
+\subsection{Ollama}
+
+\begin{lstlisting}
+curl -fsSL https://ollama.com/install.sh | sh
+sudo systemctl status ollama --no-pager | head -3
+curl -s http://localhost:11434/api/version
+\end{lstlisting}
+
+Expected: \texttt{Active: active (running)} and a JSON version response.
+
+\subsection{Pull the model}
+
+Use the size that matches your RAM:
+
+\begin{lstlisting}
+ollama pull qwen2.5-coder:7b
+\end{lstlisting}
+
+Test it:
+
+\begin{lstlisting}
+ollama run qwen2.5-coder:7b \
+  "Write a PostgreSQL SELECT that returns all rows from orders."
+\end{lstlisting}
+
+Type \texttt{/bye} to exit the model prompt.
+
+\subsection{Python project}
+
+\begin{lstlisting}
+git clone <your-repo-url> ~/Projects/secure_sql_agent
+cd ~/Projects/secure_sql_agent
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+pytest
+\end{lstlisting}
+
+Expected: \texttt{41 passed in \textless{}1s}.
+
+\subsection{Database}
+
+\begin{lstlisting}
+sudo -u postgres createdb sqlagent_demo
+sudo -u postgres psql -d sqlagent_demo \
+  -v dbname=sqlagent_demo \
+  -f scripts/bootstrap_postgres_roles.sql
+sudo -u postgres psql -d sqlagent_demo -f scripts/demo_ecommerce.sql
+sudo -u postgres psql -d sqlagent_demo -c \
+  "ALTER ROLE sql_agent_readonly WITH PASSWORD 'readonly_pass_123';"
+sudo -u postgres psql -d sqlagent_demo -c \
+  "ALTER ROLE sql_agent_writer   WITH PASSWORD 'writer_pass_456';"
+\end{lstlisting}
+
+Re-grant SELECT after the schema reload:
+
+\begin{lstlisting}
+sudo -u postgres psql -d sqlagent_demo -c \
+  "GRANT SELECT ON ALL TABLES IN SCHEMA public TO sql_agent_readonly;"
+\end{lstlisting}
+
+\subsection{Configuration}
+
+\begin{lstlisting}
+cp .env.example .env
+\end{lstlisting}
+
+Edit \texttt{.env}. Required keys:
+
+\begin{lstlisting}
+LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=qwen2.5-coder:7b
+
+READONLY_DATABASE_URL=postgresql+psycopg://sql_agent_readonly:readonly_pass_123@localhost:5432/sqlagent_demo
+WRITER_DATABASE_URL=postgresql+psycopg://sql_agent_writer:writer_pass_456@localhost:5432/sqlagent_demo
+
+ALLOWED_SCHEMAS=public
+DEFAULT_SCHEMA=public
+ENABLE_DDL=false
+MAX_WRITE_ROWS=100
+MAX_RESULT_ROWS=1000
+STATEMENT_TIMEOUT_MS=5000
+LOCK_TIMEOUT_MS=2000
+MAX_SQL_REPAIR_ATTEMPTS=2
+AUDIT_LOG_PATH=logs/audit.log
+\end{lstlisting}
+
+The read-only and writer URLs must differ. The application refuses to start
+if the two roles are the same.
+
+\subsection{Run}
+
+\begin{lstlisting}
+source .venv/bin/activate
+python -m app.main
+\end{lstlisting}
+
+Expected banner:
+
+\begin{lstlisting}
+==========================================
+          SECURE SQL AI AGENT
+==========================================
+Database: postgres
+Status:   Connected
+Schema:   public
+LLM:      ollama
+==========================================
+\end{lstlisting}
+
+---
+
+\section{Path B --- Docker}
+
+\subsection{Bring up the stack}
+
+\begin{lstlisting}
+cd ~/Projects/secure_sql_agent
+docker compose up -d --build
+\end{lstlisting}
+
+First run takes about 10 minutes: it downloads the model (\textasciitilde 5 GB).
+
+\subsection{Watch the model download}
+
+\begin{lstlisting}
+docker compose logs -f ollama-pull
+\end{lstlisting}
+
+Wait for a line containing \texttt{success}, then \texttt{Ctrl+C}.
+
+\subsection{Confirm container status}
+
+\begin{lstlisting}
+docker compose ps
+\end{lstlisting}
+
+Expected:
+
+\begin{lstlisting}
+sqlagent-postgres      Up (healthy)
+sqlagent-ollama        Up (healthy)
+sqlagent-ollama-pull   Exited (0)
+\end{lstlisting}
+
+The agent container is intentionally absent --- it starts only when you call it.
+
+\subsection{Run the interactive agent}
+
+\begin{lstlisting}
+docker compose run --rm agent
+\end{lstlisting}
+
+This gives you the same banner as native mode, with \texttt{Status: Connected}.
+
+\subsection{Stop}
+
+\begin{lstlisting}
+docker compose down         # keep data and model
+docker compose down -v      # wipe everything (model re-downloaded next run)
+\end{lstlisting}
+
+---
+
+\section{Verification checklist}
+
+Before any demo, run these three commands:
+
+\begin{lstlisting}
+# 1. Ollama reachable
+curl -s http://localhost:11434/api/version
+
+# 2. Model present
+curl -s http://localhost:11434/api/tags | jq -r '.models[].name'
+
+# 3. Read-only role can SELECT (native path uses port 5432;
+#    Docker uses port 5433)
+PGPASSWORD=readonly_pass_123 psql -h localhost -p 5432 \
+  -U sql_agent_readonly -d sqlagent_demo \
+  -c "SELECT count(*) FROM orders;"
+\end{lstlisting}
+
+All three must succeed. If they do, the CLI will start connected.
+
+\subsection{Confirm the security layers work}
+
+\begin{lstlisting}
+# Read-only role cannot write (must fail)
+PGPASSWORD=readonly_pass_123 psql -h localhost -p 5432 \
+  -U sql_agent_readonly -d sqlagent_demo \
+  -c "INSERT INTO products (name, price) VALUES ('x', 1);"
+\end{lstlisting}
+
+Expected output: \texttt{ERROR: permission denied for table products}.
+
+\begin{lstlisting}
+# Writer role can write (must succeed)
+PGPASSWORD=writer_pass_456 psql -h localhost -p 5432 \
+  -U sql_agent_writer -d sqlagent_demo \
+  -c "INSERT INTO products (name, price) VALUES ('tmp', 1) RETURNING id;"
+PGPASSWORD=writer_pass_456 psql -h localhost -p 5432 \
+  -U sql_agent_writer -d sqlagent_demo \
+  -c "DELETE FROM products WHERE name = 'tmp';"
+\end{lstlisting}
+
+Both must succeed. This proves the two-role separation is in effect.
+
+---
+
+\section{Troubleshooting}
+
+\begin{center}
+\begin{tabular}{@{}p{5.8cm}p{8.5cm}@{}}
+\toprule
+\textbf{Symptom} & \textbf{Fix} \\
+\midrule
+\texttt{ModuleNotFoundError: No module named 'pydantic'} &
+Venv is not active. \texttt{source .venv/bin/activate}. \\
+\texttt{Unit ollama.service not found} &
+Ollama not installed. Run \texttt{curl -fsSL https://ollama.com/install.sh | sh}. \\
+\texttt{connection refused} on port 5432 &
+Native Postgres is not running. \texttt{sudo systemctl start postgresql}. \\
+Docker: port 5432 already in use &
+Change host port in compose to 5433 (already default in this project). \\
+\texttt{model 'qwen2.5-coder:7b' not found} &
+Run \texttt{ollama pull qwen2.5-coder:7b} or fix \texttt{OLLAMA\_MODEL} in \texttt{.env}. \\
+Banner shows \texttt{LLM: mock} &
+A shell-level \texttt{LLM\_PROVIDER} env var overrides \texttt{.env}. Run \texttt{unset LLM\_PROVIDER}. \\
+\texttt{error parsing value for field "allowed\_schemas"} &
+Older \texttt{pydantic-settings} without \texttt{NoDecode}. Upgrade with \texttt{pip install --upgrade pydantic-settings}. \\
+\texttt{qualify() got an unexpected keyword argument 'infer\_schema'} &
+SQLGlot version drift. Run \texttt{pip install sqlglot==25.24.0}. \\
+\texttt{Extra data: line 2 ... json.tool} &
+Audit log is JSONL. Use \texttt{tail -n 1 logs/audit.log | jq .}. \\
+\texttt{permission denied for table ...} &
+Read-only role hitting a table without \texttt{SELECT}. Re-grant after schema reload. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+---
+
+\section{Optional helper script}
+
+Save the following as \texttt{scripts/setup.sh} and \texttt{chmod +x} it.
+It performs the native install end-to-end.
+
+\begin{lstlisting}[language=bash]
+#!/usr/bin/env bash
+set -euo pipefail
+
+MODEL="${MODEL:-qwen2.5-coder:7b}"
+DBNAME="${DBNAME:-sqlagent_demo}"
+
+echo "==> Installing system packages"
+sudo apt update
+sudo apt install -y python3-venv postgresql jq curl
+
+echo "==> Installing Ollama"
+if ! command -v ollama >/dev/null; then
+  curl -fsSL https://ollama.com/install.sh | sh
+fi
+
+echo "==> Pulling model ${MODEL}"
+ollama pull "${MODEL}"
+
+echo "==> Creating database ${DBNAME}"
+sudo -u postgres createdb "${DBNAME}" 2>/dev/null || true
+
+echo "==> Creating roles and loading schema"
+sudo -u postgres psql -d "${DBNAME}" -v dbname="${DBNAME}" \
+  -f scripts/bootstrap_postgres_roles.sql
+sudo -u postgres psql -d "${DBNAME}" -f scripts/demo_ecommerce.sql
+sudo -u postgres psql -d "${DBNAME}" \
+  -c "ALTER ROLE sql_agent_readonly WITH PASSWORD 'readonly_pass_123';"
+sudo -u postgres psql -d "${DBNAME}" \
+  -c "ALTER ROLE sql_agent_writer WITH PASSWORD 'writer_pass_456';"
+sudo -u postgres psql -d "${DBNAME}" \
+  -c "GRANT SELECT ON ALL TABLES IN SCHEMA public TO sql_agent_readonly;"
+
+echo "==> Setting up Python environment"
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --quiet --upgrade pip
+pip install --quiet -r requirements.txt
+
+echo "==> Running tests"
+pytest
+
+echo "==> Preparing .env"
+[ -f .env ] || cp .env.example .env
+python - <<'PY'
+from pathlib import Path
+p = Path(".env")
+t = p.read_text()
+t = t.replace("LLM_PROVIDER=mock", "LLM_PROVIDER=ollama")
+p.write_text(t)
+PY
+
+echo
+echo "Setup complete. Run:"
+echo "  source .venv/bin/activate"
+echo "  python -m app.main"
+\end{lstlisting}
+
+\end{document}
