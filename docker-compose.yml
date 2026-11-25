@@ -17,7 +17,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
-
+ 
   agent:
     build:
       context: .
@@ -33,12 +33,15 @@ services:
       LLM_PROVIDER: ollama
       OLLAMA_BASE_URL: http://host.docker.internal:11434
       OLLAMA_MODEL: qwen2.5-coder:7b
+      OLLAMA_NUM_CTX: "8192"
+      LLM_TIMEOUT_SECONDS: "180"
       DATABASE_DIALECT: postgres
       READONLY_DATABASE_URL: postgresql+psycopg://sql_agent_readonly:readonly_pass_123@postgres:5432/sqlagent_demo
       WRITER_DATABASE_URL:   postgresql+psycopg://sql_agent_writer:writer_pass_456@postgres:5432/sqlagent_demo
       ALLOWED_SCHEMAS: public
       DEFAULT_SCHEMA: public
       ENABLE_DDL: "false"
+      LIVE_VALIDATE_WRITES: "true"
       MAX_WRITE_ROWS: "100"
       MAX_RESULT_ROWS: "1000"
       STATEMENT_TIMEOUT_MS: "5000"
@@ -49,6 +52,6 @@ services:
       - ./logs:/app/logs
     stdin_open: true
     tty: true
-
+ 
 volumes:
   pg_data:
