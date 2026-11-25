@@ -1,59 +1,77 @@
 from __future__ import annotations
-
-import json
-
-from openai import OpenAI
-
-from app.llm.base import LLMClient, LLMError
+ 
+from openai import BadRequestError, OpenAI
+ 
+from app.llm.base import LLMClient, LLMError, parse_llm_payload
+from app.llm.prompts import PromptOptions, build_system_prompt, build_user_prompt
 from app.models import GeneratedSQL
-
-SYSTEM_PROMPT = """You are a secure SQL generation assistant.
-
-Rules:
-1. Generate exactly ONE SQL statement.
-2. Use only tables and columns present in the provided schema.
-3. Use the configured SQL dialect.
-4. Prefer explicit column names over SELECT *.
-5. Always use bind parameters for user-provided values.
-6. Never invent table or column names.
-7. Never generate multiple statements.
-8. Never attempt to bypass permissions.
-9. Never generate DDL unless explicitly enabled.
-10. Never execute SQL; only generate it.
-
-Return a GeneratedSQL object with query, parameters, and explanation.
-"""
-
-
+ 
+ 
 class OpenAILLMClient(LLMClient):
-    def __init__(self, api_key: str, model: str) -> None:
-        self.client = OpenAI(api_key=api_key)
+    """Uses JSON mode instead of ``chat.completions.parse(response_format=GeneratedSQL)``.
+ 
+    The old structured-output call could not work: ``parameters: dict[str, Any]``
+    is not allowed by OpenAI's strict JSON schema (additionalProperties must
+    be false), so every request failed. JSON mode also works with
+    OpenAI-compatible servers (set OPENAI_BASE_URL).
+    """
+ 
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        base_url: str | None = None,
+        timeout: float = 120.0,
+        options: PromptOptions | None = None,
+    ) -> None:
+        kwargs: dict = {"api_key": api_key, "timeout": timeout}
+        if base_url:
+            kwargs["base_url"] = base_url
+        self.client = OpenAI(**kwargs)
         self.model = model
-
+        self.options = options or PromptOptions()
+        self.system_prompt = build_system_prompt(self.options)
+        self._send_temperature = True
+ 
     def generate_sql(
         self,
         request: str,
         schema: dict,
         error_context: str | None = None,
     ) -> GeneratedSQL:
-        user_payload = {
-            "request": request,
-            "schema": schema,
-            "previous_error": error_context,
-        }
+        messages = [
+            {"role": "system", "content": self.system_prompt},
+            {
+                "role": "user",
+                "content": build_user_prompt(request, schema, self.options, error_context),
+            },
+        ]
         try:
-            completion = self.client.chat.completions.parse(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": json.dumps(user_payload, default=str)},
-                ],
-                response_format=GeneratedSQL,
-            )
+            completion = self._create(messages)
+        except LLMError:
+            raise
         except Exception as exc:
             raise LLMError(f"OpenAI request failed: {exc}") from exc
-
+ 
         message = completion.choices[0].message
-        if message.parsed is not None:
-            return message.parsed
-        raise LLMError(message.refusal or "The model did not return SQL")
+        if getattr(message, "refusal", None):
+            raise LLMError(f"The model refused: {message.refusal}")
+        return parse_llm_payload(message.content or "")
+ 
+    def _create(self, messages: list[dict]):
+        kwargs = {
+            "model": self.model,
+            "messages": messages,
+            "response_format": {"type": "json_object"},
+        }
+        if self._send_temperature:
+            kwargs["temperature"] = 0
+        try:
+            return self.client.chat.completions.create(**kwargs)
+        except BadRequestError as exc:
+            # Some reasoning models only accept the default temperature.
+            if self._send_temperature and "temperature" in str(exc).lower():
+                self._send_temperature = False
+                kwargs.pop("temperature", None)
+                return self.client.chat.completions.create(**kwargs)
+            raise
