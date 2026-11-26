@@ -1,17 +1,17 @@
 from __future__ import annotations
- 
+
 import json
 import re
 from abc import ABC, abstractmethod
 from typing import Any
- 
+
 from app.models import GeneratedSQL
- 
- 
+
+
 class LLMError(RuntimeError):
     pass
- 
- 
+
+
 class LLMClient(ABC):
     @abstractmethod
     def generate_sql(
@@ -21,11 +21,13 @@ class LLMClient(ABC):
         error_context: str | None = None,
     ) -> GeneratedSQL:
         raise NotImplementedError
- 
- 
+
+
 _FENCE = re.compile(r"^```[a-zA-Z]*\s*|\s*```$")
- 
- 
+# Reasoning models (qwen3, deepseek-r1 ...) may prefix their answer with <think>...</think>.
+_THINK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+
+
 def parse_llm_payload(content: str) -> GeneratedSQL:
     """Turn a model's text answer into GeneratedSQL, tolerating the usual
     small-model quirks: code fences, text around the JSON, "sql" instead of
@@ -33,6 +35,7 @@ def parse_llm_payload(content: str) -> GeneratedSQL:
     raw = (content or "").strip()
     if not raw:
         raise LLMError("The model returned an empty response")
+    raw = _THINK.sub("", raw).strip()
     raw = _FENCE.sub("", raw).strip()
     if not raw.startswith("{"):
         start, end = raw.find("{"), raw.rfind("}")
@@ -45,11 +48,11 @@ def parse_llm_payload(content: str) -> GeneratedSQL:
         raise LLMError(f"The model returned invalid JSON: {exc}") from exc
     if not isinstance(data, dict):
         raise LLMError("The model's JSON must be an object")
- 
+
     query = data.get("query", data.get("sql", ""))
     if not isinstance(query, str):
         raise LLMError("'query' must be a string")
- 
+
     params: Any = data.get("parameters", data.get("params", {}))
     if params is None:
         params = {}
@@ -63,7 +66,7 @@ def parse_llm_payload(content: str) -> GeneratedSQL:
     if not isinstance(params, dict):
         raise LLMError("'parameters' must be an object")
     params = {str(k).lstrip(":"): v for k, v in params.items()}
- 
+
     explanation = data.get("explanation", "")
     return GeneratedSQL(
         query=query.strip(),

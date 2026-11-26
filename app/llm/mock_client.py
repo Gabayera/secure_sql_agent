@@ -1,11 +1,11 @@
 from __future__ import annotations
- 
+
 import re
- 
+
 from app.llm.base import LLMClient
 from app.models import GeneratedSQL
- 
- 
+
+
 class MockLLMClient(LLMClient):
     def generate_sql(
         self,
@@ -14,7 +14,7 @@ class MockLLMClient(LLMClient):
         error_context: str | None = None,
     ) -> GeneratedSQL:
         text = request.lower().strip()
- 
+
         if error_context:
             if "age" in error_context.lower() and "does not exist" in error_context:
                 return GeneratedSQL(
@@ -28,7 +28,7 @@ class MockLLMClient(LLMClient):
                     parameters={},
                     explanation="Corrected: using the existing orders table.",
                 )
- 
+
         match = re.search(r"(?:latest|recent)\s+(\d+)\s+orders", text)
         if match:
             limit = int(match.group(1))
@@ -41,7 +41,7 @@ class MockLLMClient(LLMClient):
                 parameters={},
                 explanation=f"Retrieve the {limit} most recent orders.",
             )
- 
+
         if "registered" in text and ("last month" in text or "past month" in text):
             return GeneratedSQL(
                 query=(
@@ -51,7 +51,7 @@ class MockLLMClient(LLMClient):
                 parameters={},
                 explanation="Find customers who registered during the last month.",
             )
- 
+
         if "how many orders" in text and "each customer" in text:
             return GeneratedSQL(
                 query=(
@@ -61,7 +61,7 @@ class MockLLMClient(LLMClient):
                 parameters={},
                 explanation="Count orders per customer.",
             )
- 
+
         match = re.search(r"change (?:the )?price of product (\d+) to (\d+)", text)
         if match:
             product_id = int(match.group(1))
@@ -74,7 +74,7 @@ class MockLLMClient(LLMClient):
                 parameters={"price": price, "product_id": product_id},
                 explanation=f"Update the price of product {product_id} to {price}.",
             )
- 
+
         match = re.search(r"delete customer (\d+)", text)
         if match:
             customer_id = int(match.group(1))
@@ -83,9 +83,13 @@ class MockLLMClient(LLMClient):
                 parameters={"id": customer_id},
                 explanation=f"Delete customer {customer_id}.",
             )
- 
+
         return GeneratedSQL(
-            query="SELECT 1 AS result",
+            query="",
             parameters={},
-            explanation="Fallback query because the request was not recognised.",
+            explanation=(
+                "The mock model only understands a few fixed sentences, e.g. "
+                "'Show me the latest 10 orders' or 'change the price of product 5 to 250'. "
+                "Set LLM_PROVIDER=ollama or openai in .env for real questions."
+            ),
         )

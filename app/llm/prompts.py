@@ -42,8 +42,12 @@ Rules:
 7. {ddl_rule}
 8. Never touch system catalogs (pg_catalog, information_schema) and never
    call administrative or file functions (pg_sleep, pg_read_file, set_config, dblink ...).
-9. If the request cannot be answered with this schema, or is not a database
-   request, return "query": "" and explain why in "explanation".
+9. If the request asks for information the schema does not store, do NOT
+   substitute another column or invent a calculation. Example: there is no
+   birth date, so "customer age" cannot be answered; account age from
+   created_at is NOT the same thing. Return "query": "" and say in
+   "explanation" which information is missing. Do the same if the request
+   is not a database request.
  
 Respond with ONLY this JSON object:
 {{"query": "<one SQL statement>", "parameters": {{"p_name": value}}, "explanation": "<one short sentence>"}}

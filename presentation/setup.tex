@@ -1,5 +1,5 @@
 \documentclass[11pt,a4paper]{article}
- 
+
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
 \usepackage{lmodern}
@@ -11,13 +11,13 @@
 \usepackage{enumitem}
 \usepackage{titlesec}
 \usepackage{array}
- 
+
 \definecolor{codebg}{RGB}{246,246,248}
 \definecolor{codekw}{RGB}{0,90,180}
 \definecolor{codestr}{RGB}{160,50,50}
 \definecolor{codegreen}{RGB}{30,120,60}
 \definecolor{warnbg}{RGB}{255,246,230}
- 
+
 \lstdefinestyle{code}{
   basicstyle=\ttfamily\footnotesize,
   backgroundcolor=\color{codebg},
@@ -35,31 +35,31 @@
   language=bash,
 }
 \lstset{style=code}
- 
+
 \titleformat{\section}{\Large\bfseries\color{codekw}}{\thesection}{0.6em}{}
 \titleformat{\subsection}{\large\bfseries}{\thesubsection}{0.6em}{}
- 
+
 \newcommand{\note}[1]{%
   \par\smallskip\noindent\colorbox{warnbg}{\parbox{\dimexpr\linewidth-2\fboxsep}{\small #1}}\par\smallskip}
- 
+
 \hypersetup{colorlinks=true, linkcolor=codekw, urlcolor=codekw}
- 
+
 \title{\textbf{Secure SQL AI Agent --- Setup, Run and Test Guide}\\[4pt]
-       \large Version 0.2 \textperiodcentered{} uv + Docker}
+       \large Version 0.3 --- uv, Docker and the web interface}
 \author{}
 \date{\today}
- 
+
 \begin{document}
 \sloppy
 \maketitle
 \tableofcontents
 \bigskip
- 
+
 \section*{Overview}
- 
+
 This guide takes you from a clean machine to a running, tested agent.
 The layout is:
- 
+
 \begin{center}
 \begin{tabular}{@{}lll@{}}
 \toprule
@@ -67,20 +67,21 @@ The layout is:
 \midrule
 PostgreSQL 17 + demo shop data & Docker container       & \texttt{docker compose up -d postgres} \\
 Python agent (CLI)             & Your machine, via uv   & \texttt{uv run python -m app.main} \\
+Web interface                  & Your machine, via uv   & \texttt{uv run python -m app.web} \\
 LLM (Ollama)                   & Your machine           & \texttt{ollama serve} \\
 LLM (OpenAI, optional)         & Cloud API              & an API key in \texttt{.env} \\
 \bottomrule
 \end{tabular}
 \end{center}
- 
+
 You can also run the agent itself inside Docker (Section~\ref{sec:docker}),
 but running it with \textbf{uv} is the easiest way to develop and test.
- 
+
 % =====================================================================
 \section{Prerequisites}
- 
+
 \subsection{Software}
- 
+
 \begin{center}
 \begin{tabular}{@{}lll@{}}
 \toprule
@@ -93,12 +94,12 @@ jq (optional)       & reads the audit log      & \texttt{jq --version} \\
 \bottomrule
 \end{tabular}
 \end{center}
- 
+
 You do \textbf{not} need to install Python or PostgreSQL yourself: uv
 downloads a matching Python, and PostgreSQL runs in Docker.
- 
+
 \subsection{Hardware for a local model}
- 
+
 \begin{center}
 \begin{tabular}{@{}lll@{}}
 \toprule
@@ -110,38 +111,38 @@ downloads a matching Python, and PostgreSQL runs in Docker.
 \bottomrule
 \end{tabular}
 \end{center}
- 
+
 Smaller models write worse SQL, but the pipeline stays safe: bad SQL is
 rejected, never executed.
- 
+
 % =====================================================================
 \section{Install uv}
- 
+
 \begin{lstlisting}
 curl -LsSf https://astral.sh/uv/install.sh | sh
 # open a new terminal (or: source ~/.bashrc / ~/.zshrc), then:
 uv --version
 \end{lstlisting}
- 
+
 \note{uv replaces \texttt{python -m venv}, \texttt{pip install} and
 \texttt{source .venv/bin/activate}. You never have to activate the
 virtualenv: \texttt{uv run <command>} always uses the project's
 environment.}
- 
+
 % =====================================================================
 \section{Get the project and install dependencies}
- 
+
 \begin{lstlisting}
 cd ~/Projects/DOTIN/secure_sql_agent
 uv python install 3.12      # optional: uv would fetch it automatically
 uv sync                     # creates .venv and installs everything + pytest
 \end{lstlisting}
- 
+
 \texttt{uv sync} reads \texttt{pyproject.toml} and writes \texttt{uv.lock}.
 Commit \texttt{uv.lock} to git so everyone gets the exact same versions.
- 
+
 Useful uv commands:
- 
+
 \begin{center}
 \begin{tabular}{@{}ll@{}}
 \toprule
@@ -156,30 +157,30 @@ Useful uv commands:
 \bottomrule
 \end{tabular}
 \end{center}
- 
+
 \note{\texttt{requirements.txt} is still used by the \texttt{Dockerfile}.
 If you add a package with \texttt{uv add}, also add it to
 \texttt{requirements.txt}, or regenerate it with
 \texttt{uv export --no-dev --no-hashes -o requirements.txt}.}
- 
+
 % =====================================================================
 \section{Run the unit tests}
- 
+
 The unit tests need \textbf{no database and no LLM}. Run them first:
- 
+
 \begin{lstlisting}
 uv run pytest
 \end{lstlisting}
- 
-Expected: all tests pass (\texttt{59 passed}). Other useful forms:
- 
+
+Expected: all tests pass (\texttt{77 passed}). Other useful forms:
+
 \begin{lstlisting}
 uv run pytest -v                         # one line per test
 uv run pytest tests/test_hardening.py    # only the v0.2 regression tests
 uv run pytest -k unbounded               # tests whose name contains "unbounded"
 uv run pytest -x                         # stop at the first failure
 \end{lstlisting}
- 
+
 \begin{center}
 \begin{tabular}{@{}ll@{}}
 \toprule
@@ -193,63 +194,65 @@ uv run pytest -x                         # stop at the first failure
 \texttt{test\_security.py}         & read-only and writer roles must differ \\
 \texttt{test\_agent.py}            & the full pipeline with the mock LLM \\
 \texttt{test\_hardening.py}        & every bug fixed in v0.2 stays fixed \\
+\texttt{test\_direct\_sql.py}      & hand-written SQL gets the same checks; writes wait for approval \\
+\texttt{test\_web.py}              & web API: pending writes, single-use approval, edits, model switch \\
 \bottomrule
 \end{tabular}
 \end{center}
- 
+
 % =====================================================================
 \section{Start the database}
- 
+
 \begin{lstlisting}
 docker compose down -v          # first time after v0.2: rebuild the DB from scratch
 docker compose up -d postgres
 docker compose ps               # wait for: sqlagent-postgres ... (healthy)
 \end{lstlisting}
- 
+
 On first start the container runs \texttt{scripts/docker-init/01-roles.sql}
 (creates the two roles) and \texttt{02-schema.sql} (10 tables of demo shop
 data). PostgreSQL is published on \textbf{localhost:5433}.
- 
+
 \note{\texttt{down -v} deletes the database volume. The init scripts only run
 on an \emph{empty} volume, so you need it once to get the v0.2 role settings,
 and any time you want to reset the demo data.}
- 
+
 Quick check from inside the container (no local \texttt{psql} needed):
- 
+
 \begin{lstlisting}
 docker exec -it sqlagent-postgres \
   psql -U sql_agent_readonly -d sqlagent_demo -c "SELECT count(*) FROM orders;"
 \end{lstlisting}
- 
+
 % =====================================================================
 \section{Configure the agent}
- 
+
 \begin{lstlisting}
 cp .env.example .env
 \end{lstlisting}
- 
+
 The database URLs in \texttt{.env.example} already point at
 \texttt{localhost:5433}. Choose \textbf{one} LLM provider:
- 
+
 \subsection{Option A --- mock (no model, instant)}
- 
+
 \begin{lstlisting}
 LLM_PROVIDER=mock
 \end{lstlisting}
- 
+
 The mock only understands a few fixed sentences (see Section~\ref{sec:mock}).
 Use it to check the database, approval flow and audit log.
- 
+
 \subsection{Option B --- Ollama (free, local)}
- 
+
 \begin{lstlisting}
 ollama serve                    # if it is not already running as a service
 ollama pull qwen2.5-coder:7b
 curl -s http://localhost:11434/api/tags | jq -r '.models[].name'
 \end{lstlisting}
- 
+
 In \texttt{.env}:
- 
+
 \begin{lstlisting}
 LLM_PROVIDER=ollama
 OLLAMA_BASE_URL=http://localhost:11434
@@ -257,9 +260,9 @@ OLLAMA_MODEL=qwen2.5-coder:7b
 OLLAMA_NUM_CTX=8192
 LLM_TIMEOUT_SECONDS=180
 \end{lstlisting}
- 
+
 \subsection{Option C --- OpenAI or a compatible server}
- 
+
 \begin{lstlisting}
 LLM_PROVIDER=openai
 OPENAI_API_KEY=sk-...
@@ -267,9 +270,34 @@ OPENAI_MODEL=gpt-4o-mini
 # optional, for LM Studio / vLLM / OpenRouter ...:
 OPENAI_BASE_URL=
 \end{lstlisting}
- 
+
+\subsection{Choosing a model}
+
+The model only writes the SQL; every safety check is independent of it. A
+weak model is therefore not dangerous, just less useful: more questions end
+in ``not valid'' or ``couldn't turn that into a query''.
+
+\begin{center}
+\begin{tabular}{@{}p{4.2cm}p{3.2cm}p{7cm}@{}}
+\toprule
+\textbf{Model} & \textbf{Needs} & \textbf{Notes} \\
+\midrule
+\texttt{qwen2.5-coder:3b}  & 4 GB RAM  & fast on a CPU; fine for simple questions \\
+\texttt{qwen2.5-coder:7b}  & 8--16 GB RAM & clearly better JOINs and GROUP BYs; slow on a CPU \\
+\texttt{qwen2.5-coder:14b} & 16--32 GB RAM or a GPU & good quality; too slow without a GPU \\
+Cloud model (OpenAI or any OpenAI-compatible API) & API key, internet & best quality and fastest; your schema (not your rows) is sent to the provider \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Ollama runs on the GPU only if its CUDA build supports the card. Check the
+\texttt{ollama serve} log: a line such as \emph{skipping CUDA device ---
+compute capability not in compiled architectures} means the model runs on
+the CPU. In the web interface you can switch between installed Ollama
+models from the \textbf{Model} menu without restarting.
+
 \subsection{All settings}
- 
+
 \begin{center}
 \begin{tabular}{@{}>{\ttfamily}l l p{7.3cm}@{}}
 \toprule
@@ -291,19 +319,19 @@ AUDIT\_LOG\_PATH         & logs/audit.log & one JSON line per request \\
 \bottomrule
 \end{tabular}
 \end{center}
- 
+
 \note{Environment variables in your shell override \texttt{.env}. If the
 banner shows the wrong provider, run \texttt{unset LLM\_PROVIDER}.}
- 
+
 % =====================================================================
 \section{Run the agent}
- 
+
 \begin{lstlisting}
 uv run python -m app.main
 \end{lstlisting}
- 
+
 Expected banner:
- 
+
 \begin{lstlisting}
 ==================================================
               SECURE SQL AI AGENT
@@ -316,9 +344,9 @@ LLM:      ollama (qwen2.5-coder:7b)
 Type a question in plain language, 'sql <question>' to only
 generate SQL without running it, or 'help'.
 \end{lstlisting}
- 
+
 \subsection{Commands}
- 
+
 \begin{center}
 \begin{tabular}{@{}ll@{}}
 \toprule
@@ -333,24 +361,54 @@ generate SQL without running it, or 'help'.
 \bottomrule
 \end{tabular}
 \end{center}
- 
+
 \subsection{One-shot mode (scripts and CI)}
- 
+
 \begin{lstlisting}
 uv run python -m app.main --sql-only "top 5 customers by total spent"
 uv run python -m app.main --json "how many orders are pending"
 echo $?     # 0 = success, 2 = rejected or failed, 1 = startup error
 \end{lstlisting}
- 
+
+% =====================================================================
+\section{Run the web interface}
+\label{sec:web}
+
+\begin{lstlisting}
+uv run python -m app.web                 # then open http://127.0.0.1:8000
+uv run python -m app.web --port 8080     # another port
+\end{lstlisting}
+
+\begin{center}
+\begin{tabular}{@{}p{3.2cm}p{11.4cm}@{}}
+\toprule
+\textbf{Part} & \textbf{What it does} \\
+\midrule
+Tables (left)  & every table with its row count; expand one to see columns, types, keys and what each foreign key points to; search finds tables and columns \\
+Ask            & type a question; the answer shows the SQL, the five validation steps, and the rows (sortable, downloadable as CSV). Tick \emph{Only show the SQL} to run nothing \\
+Changes        & a question that changes data shows \textbf{Run change}, \textbf{Edit SQL} and \textbf{Cancel}; nothing runs until you click \textbf{Run change} \\
+Schema map     & the tables drawn as a diagram with their relationships; drag to move, scroll to zoom, click a table to see its first 50 rows \\
+Write SQL      & your own SQL, checked exactly like generated SQL \\
+Model menu     & switch between installed Ollama models \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\note{The web interface has \textbf{no login}. It listens on
+\texttt{127.0.0.1}, so only your own computer can open it. Do not start it
+with \texttt{--host 0.0.0.0} on a shared network.}
+
+The API is documented at \texttt{http://127.0.0.1:8000/api/docs}.
+
 % =====================================================================
 \section{Manual test plan}
- 
+
 Work through these in order. Each row says what you type and what must
 happen. Nothing in the ``rejected'' rows may ever change data.
- 
+
 \subsection{With the mock provider}
 \label{sec:mock}
- 
+
 \begin{center}
 \begin{tabular}{@{}p{6.0cm}p{8.6cm}@{}}
 \toprule
@@ -365,11 +423,11 @@ same again, answer \texttt{yes} & ``Affected rows: 1'' \\
 \bottomrule
 \end{tabular}
 \end{center}
- 
+
 \subsection{With a real model (Ollama or OpenAI)}
- 
+
 Model output varies, so check the \emph{outcome}, not the exact SQL.
- 
+
 \textbf{Reads} (must run without asking):
 \begin{lstlisting}
 sql top 5 customers by total spent
@@ -379,15 +437,15 @@ which products have never been ordered
 average rating per product, best first
 orders created in the last 30 days that are still pending
 \end{lstlisting}
- 
+
 \textbf{Writes} (must always show the approval prompt):
 \begin{lstlisting}
 change the price of product 7 to 39
 mark order 12 as shipped
 \end{lstlisting}
- 
+
 \textbf{Things that must be blocked}:
- 
+
 \begin{center}
 \begin{tabular}{@{}p{6.0cm}p{8.6cm}@{}}
 \toprule
@@ -395,19 +453,19 @@ mark order 12 as shipped
 \midrule
 \texttt{drop table customers} & \texttt{rejected} (DDL disabled), the model is \emph{not} asked again \\
 \texttt{delete all orders} & \texttt{rejected}: UPDATE/DELETE without a real WHERE \\
-\texttt{show each customer's age} & no such column: either repaired to a valid query or ``cannot be answered'' \\
-\texttt{what's the weather tomorrow} & ``cannot be answered with the current schema'' \\
+\texttt{show each customer's age} & no such column: either repaired to a valid query or ``couldn't turn that into a database query'' \\
+\texttt{what's the weather tomorrow} & ``couldn't turn that into a database query'' \\
 \bottomrule
 \end{tabular}
 \end{center}
- 
+
 \subsection{Approval-edit attacks}
- 
+
 Ask \texttt{change the price of product 7 to 39}. At the prompt type
 \texttt{edit} and enter each SQL below (press Enter for the parameters
 question). Every one must be \textbf{refused} (status \texttt{rejected} or
 \texttt{validation\_failed}) and \textbf{not executed}:
- 
+
 \begin{lstlisting}
 UPDATE products SET price = 0
 UPDATE products SET price = 0 WHERE 1 = 1
@@ -415,106 +473,118 @@ UPDATE products SET price = (SELECT max(price) FROM products WHERE id = 1)
 UPDATE products SET name = pg_read_file('/etc/passwd') WHERE id = 7
 SELECT * FROM customers
 \end{lstlisting}
- 
+
 Then confirm nothing changed:
- 
+
 \begin{lstlisting}
 sql show the price of product 7
 \end{lstlisting}
- 
+
 \subsection{Row-limit rollback}
- 
+
 Stop the agent, set \texttt{MAX\_WRITE\_ROWS=2} in \texttt{.env}, start it
 again and ask:
- 
+
 \begin{lstlisting}
 set stock_quantity to 0 for all products in category 4
 \end{lstlisting}
- 
+
 Approve it. Expected: ``Affected rows (\dots) exceed the configured limit
 (2); transaction rolled back.'' Check with
 \texttt{show stock of products in category 4}: the values are unchanged.
 Set \texttt{MAX\_WRITE\_ROWS} back to \texttt{100}.
- 
+
+\subsection{In the web interface}
+
+\begin{enumerate}[leftmargin=*]
+  \item Click a suggested question. The answer shows five green steps and a table.
+  \item Ask \texttt{change the price of product 7 to 39}. Click \textbf{Cancel};
+        then ask again and click \textbf{Run change}: ``1 row changed''.
+  \item Ask it once more, click \textbf{Edit SQL}, remove the \texttt{WHERE}
+        clause, click \textbf{Check edited SQL}: it must be \textbf{Refused}.
+  \item Open \textbf{Schema map}, click \texttt{orders}: related tables stay
+        highlighted and its rows appear below.
+\end{enumerate}
+
 % =====================================================================
 \section{Verify the database security layer}
- 
+
 These commands bypass the agent completely and talk to PostgreSQL
 directly. They prove the last line of defence does not depend on Python.
- 
+
 \begin{lstlisting}
 # 1. Read-only role can read
 docker exec -it sqlagent-postgres psql -U sql_agent_readonly -d sqlagent_demo \
   -c "SELECT count(*) FROM products;"
- 
+
 # 2. Read-only role can NOT write (must fail)
 docker exec -it sqlagent-postgres psql -U sql_agent_readonly -d sqlagent_demo \
   -c "UPDATE products SET price = 0 WHERE id = 1;"
 #    ERROR: cannot execute UPDATE in a read-only transaction
- 
+
 # 3. Even switching the session to read-write does not help (must fail)
 docker exec -it sqlagent-postgres psql -U sql_agent_readonly -d sqlagent_demo \
   -c "SET default_transaction_read_only = off" \
   -c "UPDATE products SET price = 0 WHERE id = 1;"
 #    ERROR: permission denied for table products
- 
+
 # 4. Writer role can write, but not change the schema (must fail)
 docker exec -it sqlagent-postgres psql -U sql_agent_writer -d sqlagent_demo \
   -c "DROP TABLE reviews;"
 #    ERROR: must be owner of table reviews
 \end{lstlisting}
- 
+
 % =====================================================================
 \section{Read the audit log}
- 
+
 Every request, including rejected ones, adds one JSON line:
- 
+
 \begin{lstlisting}
 tail -n 1 logs/audit.log | jq .
 jq -c '{t: .timestamp, q: .natural_language_request, ok: .execution_success, \
         approval: .approval_decision, err: .error}' logs/audit.log
 \end{lstlisting}
- 
+
 Fields to look at: \texttt{mode} (\texttt{execute} or
 \texttt{generate\_only}), \texttt{sql}, \texttt{validation\_result},
 \texttt{approval\_decision} (\texttt{APPROVED}, \texttt{REJECTED},
 \texttt{REJECTED\_UNBOUNDED}, \texttt{EDITED\_INVALID}, \dots),
 \texttt{affected\_rows} and \texttt{error}.
- 
+
 % =====================================================================
 \section{Optional: run the agent in Docker}
 \label{sec:docker}
- 
+
 Ollama runs on your machine, so it must accept connections from containers:
- 
+
 \begin{lstlisting}
 OLLAMA_HOST=0.0.0.0 ollama serve        # or set it in the systemd service
 \end{lstlisting}
- 
+
 Then:
- 
+
 \begin{lstlisting}
 docker compose up -d postgres
 docker compose build agent
 docker compose run --rm agent           # interactive; 'up' would not give you a prompt
 \end{lstlisting}
- 
+
 Inside Docker the agent reaches the database as \texttt{postgres:5432} and
 Ollama as \texttt{host.docker.internal:11434}; both are already set in
 \texttt{docker-compose.yml}.
- 
+
 % =====================================================================
 \section{Stop and reset}
- 
+
 \begin{lstlisting}
 docker compose down        # stop, keep data
 docker compose down -v     # stop and delete the database (demo data reloads next start)
 rm -rf .venv && uv sync    # rebuild the Python environment from uv.lock
 \end{lstlisting}
- 
+
 % =====================================================================
 \section{Troubleshooting}
- 
+
 \begin{center}
 \begin{tabular}{@{}p{5.8cm}p{8.8cm}@{}}
 \toprule
@@ -544,9 +614,14 @@ The two URLs in \texttt{.env} are identical; they must use different users. \\
 The model could not produce valid SQL. Rephrase, or use a stronger model. \\
 Tests fail on import (\texttt{NoDecode}, \texttt{qualify}) &
 Wrong library versions: \texttt{uv sync} (versions are pinned in \texttt{pyproject.toml}). \\
+\texttt{ModuleNotFoundError: fastapi} &
+Run \texttt{uv sync} after updating \texttt{pyproject.toml}. \\
+Web page shows ``Can't reach the agent server'' &
+The \texttt{app.web} process stopped; start it again and reload the page. \\
+\texttt{address already in use} &
+Port 8000 is taken: \texttt{uv run python -m app.web --port 8080}. \\
 \bottomrule
 \end{tabular}
 \end{center}
- 
+
 \end{document}
- 

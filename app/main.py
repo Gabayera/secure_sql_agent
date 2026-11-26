@@ -1,8 +1,8 @@
 from __future__ import annotations
- 
+
 import argparse
 import sys
- 
+
 from app.agent import SQLAgent
 from app.config import Settings, get_settings
 from app.database.connection import create_readonly_engine, create_writer_engine
@@ -23,11 +23,11 @@ from app.sql.classifier import SQLClassifier
 from app.sql.live_validator import LiveValidator
 from app.sql.parser import SQLParser
 from app.sql.schema_validator import SchemaValidator
- 
+
 MAX_DISPLAY_ROWS = 50
 MAX_CELL_WIDTH = 40
- 
- 
+
+
 def build_llm(settings: Settings) -> LLMClient:
     options = PromptOptions(
         dialect=settings.database_dialect,
@@ -53,13 +53,13 @@ def build_llm(settings: Settings) -> LLMClient:
             options=options,
         )
     return MockLLMClient()
- 
- 
+
+
 def build_service(settings: Settings) -> QueryService:
     readonly_engine = create_readonly_engine(settings.readonly_database_url)
     writer_engine = create_writer_engine(settings.writer_database_url)
     PermissionChecker(readonly_engine, writer_engine).verify_roles_differ()
- 
+
     introspector = SchemaIntrospector(
         readonly_engine,
         allowed_schemas=settings.allowed_schemas,
@@ -71,11 +71,11 @@ def build_service(settings: Settings) -> QueryService:
         cache_ttl=settings.schema_cache_ttl,
     )
     schema_manager.refresh()
- 
+
     approval_provider = CLIApprovalProvider()
     approval_manager = ApprovalManager(approval_provider)
     audit = AuditLogger(settings.audit_log_path)
- 
+
     executor = DatabaseExecutor(
         readonly_engine=readonly_engine,
         writer_engine=writer_engine,
@@ -85,13 +85,13 @@ def build_service(settings: Settings) -> QueryService:
         statement_timeout_ms=settings.statement_timeout_ms,
         lock_timeout_ms=settings.lock_timeout_ms,
     )
- 
+
     live_validator = LiveValidator(
         readonly_engine,
         statement_timeout_ms=settings.statement_timeout_ms,
         writer_engine=writer_engine if settings.live_validate_writes else None,
     )
- 
+
     agent = SQLAgent(
         llm=build_llm(settings),
         schema_manager=schema_manager,
@@ -111,11 +111,11 @@ def build_service(settings: Settings) -> QueryService:
         approval_provider=approval_provider,
     )
     return QueryService(agent)
- 
- 
+
+
 # ---------------------------------------------------------------- output
- 
- 
+
+
 def _print_banner(settings: Settings, service: QueryService | None) -> None:
     model = {
         "openai": settings.openai_model,
@@ -131,13 +131,13 @@ def _print_banner(settings: Settings, service: QueryService | None) -> None:
     print("=" * 50)
     print("Type a question in plain language, 'sql <question>' to only")
     print("generate SQL without running it, or 'help'.")
- 
- 
+
+
 def _cell(value) -> str:
     text = "NULL" if value is None else str(value).replace("\n", " ")
     return text if len(text) <= MAX_CELL_WIDTH else text[: MAX_CELL_WIDTH - 1] + "…"
- 
- 
+
+
 def format_table(columns: list[str], rows: list[dict]) -> str:
     if not rows:
         return "(no rows)"
@@ -152,8 +152,8 @@ def format_table(columns: list[str], rows: list[dict]) -> str:
         "| " + " | ".join(v.ljust(w) for v, w in zip(r, widths)) + " |" for r in data
     ]
     return "\n".join([sep, head, sep, *body, sep])
- 
- 
+
+
 def _print_response(response: AgentResponse) -> None:
     print()
     if response.generated_sql and response.generated_sql.query:
@@ -188,8 +188,8 @@ def _print_response(response: AgentResponse) -> None:
         print()
     print(f"Agent: {response.message}")
     print("-" * 50)
- 
- 
+
+
 HELP = """
 Commands:
   <question>        Generate SQL, validate it and run it
@@ -201,8 +201,8 @@ Commands:
   help              Show this help
   exit / quit       Exit
 """
- 
- 
+
+
 def _repl(settings: Settings, service: QueryService | None) -> int:
     while True:
         try:
@@ -212,7 +212,6 @@ def _repl(settings: Settings, service: QueryService | None) -> int:
             return 0
         if not raw:
             continue
-        
         command = " ".join(raw.lower().split())
         command = {
             "show schema": "show_schema",
@@ -223,7 +222,6 @@ def _repl(settings: Settings, service: QueryService | None) -> int:
             "refresh schema": "refresh_schema",
             "refresh": "refresh_schema",
         }.get(command, command)
-        
         if command in ("exit", "quit"):
             return 0
         if command == "help":
@@ -256,8 +254,8 @@ def _repl(settings: Settings, service: QueryService | None) -> int:
             print("\n(cancelled)")
         except Exception as exc:
             print(f"Agent: error: {exc}")
- 
- 
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Secure natural-language SQL agent")
     parser.add_argument("question", nargs="*", help="run one question and exit")
@@ -266,19 +264,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--json", action="store_true", help="print the response as JSON")
     args = parser.parse_args(argv)
- 
+
     try:
         settings = get_settings()
     except Exception as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 1
- 
+
     service: QueryService | None = None
     try:
         service = build_service(settings)
     except Exception as exc:
         print(f"Startup error: {exc}", file=sys.stderr)
- 
+
     question = " ".join(args.question).strip()
     if question:
         if service is None:
@@ -289,10 +287,10 @@ def main(argv: list[str] | None = None) -> int:
         else:
             _print_response(response)
         return 0 if response.status == "success" else 2
- 
+
     _print_banner(settings, service)
     return _repl(settings, service)
- 
- 
+
+
 if __name__ == "__main__":
     raise SystemExit(main())

@@ -1,6 +1,6 @@
 [project]
 name = "secure-sql-agent"
-version = "0.2.0"
+version = "0.3.0"
 description = "Secure, self-validating natural-language-to-SQL agent"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -13,6 +13,8 @@ dependencies = [
     "python-dotenv>=1.0",
     "openai>=1.40",
     "httpx>=0.27",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
 ]
 
 # `uv sync` installs this group by default, so `uv run pytest` just works.

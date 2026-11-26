@@ -1,16 +1,16 @@
 \documentclass[aspectratio=169,10pt]{beamer}
- 
+
 % ---- Encoding & fonts -----------------------------------------
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
 \usepackage{lmodern}
- 
+
 % ---- Theme ----------------------------------------------------
 \usetheme{Madrid}
 \usecolortheme{default}
 \setbeamertemplate{navigation symbols}{}
 \setbeamertemplate{footline}[frame number]
- 
+
 % ---- Packages -------------------------------------------------
 \usepackage{booktabs}
 \usepackage{listings}
@@ -18,7 +18,9 @@
 \usepackage{tikz}
 \usetikzlibrary{arrows.meta, positioning, shapes.geometric}
 \usepackage{hyperref}
- 
+\usepackage{graphicx}
+\graphicspath{{img/}}
+
 % ---- Colors ---------------------------------------------------
 \definecolor{codebg}{RGB}{245,245,248}
 \definecolor{codekw}{RGB}{0,90,180}
@@ -29,7 +31,7 @@
 \definecolor{panelred}{RGB}{170,40,40}
 \definecolor{panelgreen}{RGB}{40,130,70}
 \definecolor{panelgray}{RGB}{90,90,90}
- 
+
 % ---- Listings (ASCII only) ------------------------------------
 \lstdefinestyle{code}{
   basicstyle=\ttfamily\scriptsize,
@@ -48,20 +50,20 @@
   upquote=true,
 }
 \lstset{style=code}
- 
+
 \title{Secure SQL AI Agent}
 \subtitle{Plain-English database questions, safe by construction}
 \author{Your Name}
 \institute{Your Organisation}
 \date{\today}
- 
+
 \begin{document}
- 
+
 % ===============================================================
 \begin{frame}
   \titlepage
 \end{frame}
- 
+
 % ===============================================================
 \begin{frame}{The problem}
   \begin{block}{People want to ask the database in plain language}
@@ -69,7 +71,7 @@
     \emph{``Change the price of `Clean Code' to 39.''}\\
     \emph{``Which products have never been ordered?''}
   \end{block}
- 
+
   \begin{alertblock}{Letting an LLM write SQL directly is dangerous}
     \begin{itemize}
       \item It can emit \texttt{DROP TABLE} or \texttt{DELETE} without a \texttt{WHERE}
@@ -80,7 +82,7 @@
     \end{itemize}
   \end{alertblock}
 \end{frame}
- 
+
 % ===============================================================
 \begin{frame}{The solution: three independent security layers}
   \begin{columns}[T]
@@ -106,14 +108,14 @@
       \end{block}
     \end{column}
   \end{columns}
- 
+
   \vspace{8pt}
   \begin{alertblock}{Design principle}
     The LLM is \emph{untrusted input}. No single layer is trusted either:
     each one fails in a different way, so one failure is never enough.
   \end{alertblock}
 \end{frame}
- 
+
 % ===============================================================
 \begin{frame}{Architecture}
   \centering
@@ -132,19 +134,19 @@
     \node[box, right=of llm] (parse) {1. Parse};
     \node[box, right=of parse] (pol) {2. Policy};
     \node[box, right=of pol] (par) {3. Parameters};
- 
+
     \node[box, below=10mm of par] (sch) {4. Schema};
     \node[box, left=of sch] (exp) {5. EXPLAIN};
     \node[decnode, left=of exp] (dec) {read?};
- 
+
     \node[good, below left=8mm and -4mm of dec] (ro) {Read-only role};
     \node[bad, below right=8mm and -4mm of dec] (appr) {Approval\\+ token};
     \node[bad, right=of appr] (wr) {Writer role\\\tiny row limit};
     \node[box, fill=gray!10, draw=panelgray, right=of wr] (audit) {Audit log};
- 
+
     \node[bad, above=6mm of pol] (rej) {Rejected\\\tiny no retry};
     \node[box, fill=yellow!10, draw=orange, above=6mm of parse] (rep) {Repair\\\tiny errors of 1, 3, 4, 5};
- 
+
     \draw[arrow] (user) -- (llm);
     \draw[arrow] (llm) -- (parse);
     \draw[arrow] (parse) -- (pol);
@@ -161,12 +163,12 @@
     \draw[arrow, orange, dashed] (parse.north) -- (rep.south);
     \draw[arrow] (ro.south) -- ++(0,-3mm) -| (audit.south);
   \end{tikzpicture}
- 
+
   \vspace{6pt}
   {\footnotesize Everything after the LLM is deterministic Python. Mistakes go back
   to the model; forbidden requests are rejected immediately.}
 \end{frame}
- 
+
 % ===============================================================
 \begin{frame}{The validation pipeline}
   \centering
@@ -184,10 +186,10 @@
     Write guard   & UPDATE/DELETE without a real \texttt{WHERE}      & no  & \texttt{rejected} \\
     \bottomrule
   \end{tabular}
- 
+
   \vspace{4pt}
   {\footnotesize \emph{repair} = the failed SQL and the error are sent back to the LLM.}
- 
+
   \vspace{6pt}
   \begin{block}{Why not retry everything?}
     \footnotesize
@@ -196,7 +198,7 @@
     time and money.
   \end{block}
 \end{frame}
- 
+
 % ===============================================================
 \begin{frame}[fragile]{Giving the model the right context}
   \begin{columns}[T]
@@ -234,7 +236,7 @@ TABLE public.orders (id INTEGER PK,
     \end{column}
   \end{columns}
 \end{frame}
- 
+
 % ===============================================================
 \begin{frame}[fragile]{Layer 1: classification on the syntax tree}
 \begin{lstlisting}[language=Python]
@@ -253,14 +255,14 @@ def classify(self, tree):
         return ddl() if ENABLE_DDL else unsupported("DDL disabled")
     return unsupported(type(tree).__name__)
 \end{lstlisting}
- 
+
   \begin{alertblock}{Allowlist, not blocklist}
     \footnotesize Only the statement shapes listed above can pass. Anything
     else --- \texttt{COPY}, \texttt{SET}, \texttt{DO \$\$...\$\$}, \texttt{VACUUM} --- is
     rejected because it is \emph{not} on the list.
   \end{alertblock}
 \end{frame}
- 
+
 % ===============================================================
 \begin{frame}[fragile]{Bounded writes}
   \begin{columns}[T]
@@ -289,7 +291,7 @@ def is_potentially_unbounded_write(tree):
       \end{tabular}
     \end{column}
   \end{columns}
- 
+
   \vspace{8pt}
   \begin{block}{And after execution}
     \footnotesize
@@ -297,7 +299,7 @@ def is_potentially_unbounded_write(tree):
     it is \textbf{rolled back}. Statement and lock timeouts stop slow or blocked writes.
   \end{block}
 \end{frame}
- 
+
 % ===============================================================
 \begin{frame}[fragile]{Layer 2: one-time approval tokens}
 \begin{lstlisting}[language=Python]
@@ -307,21 +309,21 @@ def create_token(request):
         sql_hash=sha256(request.sql),
         params_hash=sha256(json.dumps(request.parameters, sort_keys=True)))
     return token
- 
+
 def verify_and_consume(token, sql, params):
     stored = self._pending.pop(token, None)                 # one-time use
     if stored is None:                       raise ApprovalError("invalid or used")
     if stored.sql_hash != sha256(sql):       raise ApprovalError("different SQL")
     if stored.params_hash != sha256(params): raise ApprovalError("different parameters")
 \end{lstlisting}
- 
+
   \begin{alertblock}{Edits at the prompt are untrusted too}
     \footnotesize
     Edited SQL goes through \emph{every} check again --- validation, ``must still be a
     write'', the unbounded-write guard --- and gets a fresh approval prompt.
   \end{alertblock}
 \end{frame}
- 
+
 % ===============================================================
 \begin{frame}[fragile]{Layer 3: database-enforced permissions}
   \begin{columns}[T]
@@ -346,31 +348,31 @@ GRANT SELECT, INSERT, UPDATE, DELETE
       \end{block}
     \end{column}
   \end{columns}
- 
+
   \begin{block}{\footnotesize The read path cannot write --- for three independent reasons}
     \footnotesize no write grants \textperiodcentered{} read-only role setting
     \textperiodcentered{} \texttt{SET TRANSACTION READ ONLY} on every read
   \end{block}
- 
+
   \begin{alertblock}{\footnotesize The critical test, bypassing Python completely}
     \footnotesize
     \texttt{psql -U sql\_agent\_readonly -c "UPDATE products SET price = 0 WHERE id = 1"}\\
     \texttt{ERROR: cannot execute UPDATE in a read-only transaction}
   \end{alertblock}
 \end{frame}
- 
+
 % ===============================================================
 \begin{frame}[fragile]{One read request}
 \begin{lstlisting}
 You: top 3 customers by total spent
- 
+
 Generated SQL:
 SELECT c.id, c.full_name, SUM(o.total_amount) AS total_spent
 FROM customers c JOIN orders o ON o.customer_id = c.id
 GROUP BY c.id, c.full_name ORDER BY total_spent DESC LIMIT 3;
- 
+
 Validation: [PASS] schema
- 
+
 +----+---------------+-------------+
 | id | full_name     | total_spent |
 +----+---------------+-------------+
@@ -383,12 +385,12 @@ Agent: Query executed successfully. 3 row(s) returned.
   {\footnotesize parsed $\rightarrow$ classified as read $\rightarrow$ columns resolved
   $\rightarrow$ \texttt{EXPLAIN} on the read-only role $\rightarrow$ executed $\rightarrow$ audited}
 \end{frame}
- 
+
 % ===============================================================
 \begin{frame}[fragile]{One write request}
 \begin{lstlisting}
 You: change the price of product 7 to 39
- 
+
 ==========================================
           WRITE APPROVAL REQUIRED
 ==========================================
@@ -402,27 +404,27 @@ Tables: products
 1. Approve   2. Reject   3. Edit
 ==========================================
 Approve? (yes/no/edit): yes
- 
+
 Agent: Write operation executed successfully. Affected rows: 1.
 \end{lstlisting}
   \centering\footnotesize Before this prompt appeared, the UPDATE was already
   checked with \texttt{EXPLAIN} --- planned, never executed, rolled back.
 \end{frame}
- 
+
 % ===============================================================
 \begin{frame}[fragile]{Bounded self-repair}
 \begin{lstlisting}
 You: show each customer's age
- 
+
 [attempt 1] SELECT c.full_name, c.age FROM customers c
             -> schema: Column 'age' could not be resolved
- 
+
 [attempt 2] the model receives its SQL, its parameters and the problem
             -> {"query": "", "explanation": "There is no age or birth date column."}
- 
-Agent: The request cannot be answered with the current schema.
+
+Agent: I couldn't turn that into a database query.
 \end{lstlisting}
- 
+
   \begin{block}{Rules}
     \footnotesize
     \begin{itemize}
@@ -433,7 +435,7 @@ Agent: The request cannot be answered with the current schema.
     \end{itemize}
   \end{block}
 \end{frame}
- 
+
 % ===============================================================
 \begin{frame}[fragile]{Ways to use it}
   \begin{columns}[T]
@@ -441,7 +443,7 @@ Agent: The request cannot be answered with the current schema.
       \begin{block}{Interactive}
 \begin{lstlisting}
 uv run python -m app.main
- 
+
 You: how many orders are pending
 You: sql top 5 products by revenue
 You: show_schema
@@ -455,7 +457,7 @@ You: show_schema
 \begin{lstlisting}
 uv run python -m app.main \
   --sql-only "customers from Berlin"
- 
+
 uv run python -m app.main \
   --json "how many orders are pending"
 \end{lstlisting}
@@ -463,15 +465,82 @@ uv run python -m app.main \
       \end{block}
     \end{column}
   \end{columns}
- 
+
   \vspace{6pt}
+  \begin{block}{Web interface}
+    \footnotesize \texttt{uv run python -m app.web} $\rightarrow$ \texttt{http://127.0.0.1:8000}
+  \end{block}
   \begin{block}{LLM providers}
     \footnotesize Ollama (local, free) \textperiodcentered{} OpenAI \textperiodcentered{}
     any OpenAI-compatible server (\texttt{OPENAI\_BASE\_URL}) \textperiodcentered{}
     mock (for tests)
   \end{block}
 \end{frame}
- 
+
+% ===============================================================
+\begin{frame}{Web interface}
+  \begin{columns}[T]
+    \begin{column}{0.5\textwidth}
+      \centering
+      \includegraphics[width=\linewidth]{web-ask.png}\\[2pt]
+      {\scriptsize Ask: SQL, the five checks, results; changes wait for approval}
+    \end{column}
+    \begin{column}{0.5\textwidth}
+      \centering
+      \includegraphics[width=\linewidth]{web-map.png}\\[2pt]
+      {\scriptsize Schema map: tables, keys and relationships; click for rows}
+    \end{column}
+  \end{columns}
+
+  \vspace{8pt}
+  \begin{block}{}
+    \footnotesize
+    Table browser with row counts \textperiodcentered{} sortable results and CSV export
+    \textperiodcentered{} hand-written SQL with the same checks \textperiodcentered{}
+    switch Ollama models from the header \textperiodcentered{} no CDN, works offline
+  \end{block}
+\end{frame}
+
+% ===============================================================
+\begin{frame}{The browser chooses whether, never what}
+  \centering
+  \begin{tikzpicture}[
+    node distance=5mm and 9mm,
+    box/.style={rectangle, rounded corners=2pt, draw=panelblue, fill=blue!5,
+                minimum width=3.1cm, minimum height=8mm, font=\scriptsize, align=center},
+    bad/.style={box, fill=red!8, draw=panelred},
+    arrow/.style={-{Latex[length=1.2mm]}, draw=panelgray, thick},
+  ]
+    \node[box] (b1) {Browser\\\texttt{POST /api/ask}};
+    \node[box, right=of b1] (s1) {Server: generate + validate\\store SQL under id \texttt{p1}};
+    \node[box, right=of s1] (b2) {Browser shows a copy\\Run change / Edit / Cancel};
+    \node[box, below=10mm of b2] (b3) {\texttt{POST /api/approve}\\\texttt{\{"pending\_id": "p1"\}}};
+    \node[box, left=of b3] (s2) {Server pops \texttt{p1}\\validates again};
+    \node[bad, left=of s2] (s3) {one-time token\\$\rightarrow$ writer role};
+    \draw[arrow] (b1) -- (s1);
+    \draw[arrow] (s1) -- (b2);
+    \draw[arrow] (b2) -- (b3);
+    \draw[arrow] (b3) -- (s2);
+    \draw[arrow] (s2) -- (s3);
+  \end{tikzpicture}
+
+  \vspace{8pt}
+  \begin{columns}[T]
+    \begin{column}{0.48\textwidth}
+      \begin{block}{\footnotesize Why}
+        \footnotesize Approval carries only an id. Editing the HTTP request cannot
+        change which SQL runs; each id works once and expires after 15 minutes.
+      \end{block}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \begin{alertblock}{\footnotesize Limits}
+        \footnotesize No login yet: the server listens on \texttt{127.0.0.1} only.
+        Add authentication before sharing it.
+      \end{alertblock}
+    \end{column}
+  \end{columns}
+\end{frame}
+
 % ===============================================================
 \begin{frame}{Version 0.2: security fixes}
   \footnotesize
@@ -493,14 +562,14 @@ uv run python -m app.main \
       & role-level \texttt{default\_transaction\_read\_only} \\
     \bottomrule
   \end{tabular}
- 
+
   \vspace{6pt}
   \begin{alertblock}{}
     \footnotesize Every one of these passed the original tests. Each now has a regression
     test in \texttt{tests/test\_hardening.py}.
   \end{alertblock}
 \end{frame}
- 
+
 % ===============================================================
 \begin{frame}{Version 0.2: correctness and quality}
   \footnotesize
@@ -535,7 +604,7 @@ uv run python -m app.main \
     \end{column}
   \end{columns}
 \end{frame}
- 
+
 % ===============================================================
 \begin{frame}{Live demo}
   \begin{columns}[T]
@@ -563,7 +632,7 @@ uv run python -m app.main \
         \begin{itemize}
           \item drop table customers $\rightarrow$ DDL disabled
           \item delete all orders $\rightarrow$ no real \texttt{WHERE}
-          \item what's the weather $\rightarrow$ cannot be answered
+          \item what's the weather $\rightarrow$ not a database question
           \item edit at the prompt to\\
                 \texttt{UPDATE products SET price = 0} $\rightarrow$ rejected
           \item delete customer 3 $\rightarrow$ foreign key error, rolled back
@@ -572,7 +641,7 @@ uv run python -m app.main \
     \end{column}
   \end{columns}
 \end{frame}
- 
+
 % ===============================================================
 \begin{frame}{How it is tested}
   \begin{columns}[T]
@@ -591,11 +660,13 @@ uv run python -m app.main \
           Role separation    & 2 \\
           Agent pipeline     & 4 \\
           v0.2 regressions   & 18 \\
+          Direct SQL entry   & 8 \\
+          Web API            & 10 \\
           \midrule
-          \textbf{Total}     & \textbf{59} \\
+          \textbf{Total}     & \textbf{77} \\
           \bottomrule
         \end{tabular}
- 
+
         \vspace{3pt}
         No database or LLM needed.
       \end{block}
@@ -608,13 +679,14 @@ uv run python -m app.main \
           \item approval-edit attacks
           \item row-limit rollback (\texttt{MAX\_WRITE\_ROWS=2})
           \item direct \texttt{psql} as each role, bypassing Python
+          \item approve, edit and cancel in the web interface
           \item every request checked in \texttt{logs/audit.log}
         \end{itemize}
       \end{block}
     \end{column}
   \end{columns}
 \end{frame}
- 
+
 % ===============================================================
 \begin{frame}{Stack}
   \begin{columns}[T]
@@ -632,6 +704,7 @@ uv run python -m app.main \
           SQL parsing  & SQLGlot 25.24 \\
           Config       & Pydantic 2 \\
           LLM          & Ollama / OpenAI \\
+          Web          & FastAPI + plain HTML/JS \\
           Tests        & pytest \\
           \bottomrule
         \end{tabular}
@@ -644,11 +717,12 @@ uv run python -m app.main \
           \toprule
           \textbf{Metric} & \textbf{Value} \\
           \midrule
-          Python modules       & 24 \\
-          Unit tests           & 59 \\
+          Python modules       & 26 \\
+          Unit tests           & 77 \\
           Validation stages    & 5 + write guard \\
           Security layers      & 3 \\
           LLM providers        & 3 (incl.\ mock) \\
+          Interfaces           & CLI + web \\
           Demo tables          & 10 \\
           \bottomrule
         \end{tabular}
@@ -656,7 +730,7 @@ uv run python -m app.main \
     \end{column}
   \end{columns}
 \end{frame}
- 
+
 % ===============================================================
 \begin{frame}{Guarantees and limits}
   \begin{block}{What the system guarantees}
@@ -670,7 +744,7 @@ uv run python -m app.main \
       \item \textbf{Fail-closed}: when in doubt, refuse
     \end{itemize}
   \end{block}
- 
+
   \begin{alertblock}{What it does not guarantee}
     \footnotesize
     \begin{itemize}
@@ -682,7 +756,7 @@ uv run python -m app.main \
     \end{itemize}
   \end{alertblock}
 \end{frame}
- 
+
 % ===============================================================
 \begin{frame}{Extending the project}
   \begin{block}{Another LLM provider}
@@ -691,21 +765,21 @@ uv run python -m app.main \
     \texttt{app/llm/prompts.py}; add one branch in \texttt{build\_llm()}.
     Nothing else changes.
   \end{block}
- 
-  \begin{block}{A web or chat interface}
+
+  \begin{block}{Team use}
     \footnotesize
-    Wrap \texttt{QueryService.execute()} / \texttt{generate()} in FastAPI.
-    Replace \texttt{CLIApprovalProvider} with a Slack, email or web approval that
-    implements the same one-method protocol.
+    Put a login in front of the web server and pass the user name to the agent,
+    which already records it in every audit entry. Approvals could move to Slack or
+    e-mail with the same one-method provider protocol.
   \end{block}
- 
+
   \begin{block}{Another database}
     \footnotesize
     Set \texttt{DATABASE\_DIALECT}; review the dangerous-function list and the
     read-only transaction commands for that database.
   \end{block}
 \end{frame}
- 
+
 % ===============================================================
 \begin{frame}{Summary}
   \begin{block}{What we built}
@@ -713,7 +787,7 @@ uv run python -m app.main \
     safely and asks a human before any write --- with \textbf{three independent
     security layers}.
   \end{block}
- 
+
   \begin{block}{Why it works}
     \begin{itemize}
       \item deterministic checks on the syntax tree, not on strings
@@ -722,9 +796,8 @@ uv run python -m app.main \
       \item PostgreSQL roles are the last line of defence
     \end{itemize}
   \end{block}
- 
+
   \centering\Large\bfseries Questions?
 \end{frame}
- 
+
 \end{document}
- 
