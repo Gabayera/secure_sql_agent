@@ -212,7 +212,18 @@ def _repl(settings: Settings, service: QueryService | None) -> int:
             return 0
         if not raw:
             continue
-        command = raw.lower()
+        
+        command = " ".join(raw.lower().split())
+        command = {
+            "show schema": "show_schema",
+            "schema": "show_schema",
+            "tables": "show_schema",
+            "show status": "show_status",
+            "status": "show_status",
+            "refresh schema": "refresh_schema",
+            "refresh": "refresh_schema",
+        }.get(command, command)
+        
         if command in ("exit", "quit"):
             return 0
         if command == "help":
