@@ -131,6 +131,11 @@ class SQLAgent:
                     status="rejected",
                     request_id=request_id,
                     message=(
+                        "I couldn't turn that into a database query. "
+                        + (generated.explanation or "")
+                        + " Ask about the data (e.g. 'top 3 customers by total spent'),"
+                        " or type 'show_schema' to see the tables."
+                    ).strip(),message=(
                         "The request cannot be answered with the current schema. "
                         + (generated.explanation or "")
                     ).strip(),
